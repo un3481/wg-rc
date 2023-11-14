@@ -27,7 +27,20 @@ DB_FILE="$TMPDIR/nordvpn-rc-db"
 CONFIG_FILE="/etc/wireguard/nordvpn.json"
 NORDVPN_API_CREDENTIALS="https://api.nordvpn.com/v1/users/services/credentials"
 
-# get wireguard private key from nordvpn
+# Print error message for invalid token and exit
+exit_invalid_token() {
+	echo -e "You have not set a valid nordvpn access token."
+	echo -e "Please follow the instructions provided in their website to obtain a new token: https://support.nordvpn.com/Connectivity/Linux/1905092252/How-to-log-in-to-NordVPN-on-Linux-with-a-token.htm"
+	echo -e "Once you have copied your token, you can set it in nordvpn-rc by running 'nordvpn-rc set --token <your-token-goes-here>'."
+	exit 1
+}
+
+# set nordvpn access token in the config file
+set_token() {
+	exit 1	
+}
+
+# get wireguard private key from nordvpn and put it in the config file
 update_private_key() {
 	local config token response errors private_key
 	
@@ -57,4 +70,5 @@ update_private_key() {
 }
 
 # main
+
 

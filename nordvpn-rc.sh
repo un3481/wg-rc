@@ -187,7 +187,7 @@ set_token() {
 set_interface() {
 	verify_root
 	
-	local config interface
+	local config interface wg_if_file
 	interface=$1
 
 	# check the string provided by user
@@ -196,8 +196,9 @@ set_interface() {
 	fi
 
 	# check for existing config file
-	if test -f "$WIREGUARD_DIR/$interface.conf"; then
-		echo -e "File '$WIREGUARD_DIR/$interface.conf' already exists."
+	wg_if_file="$WIREGUARD_DIR/$interface.conf"
+	if test -f "$wg_if_file"; then
+		echo -e "File '$wg_if_file' already exists."
 		read -p "Do you want to override it? [Yes/No] " -r
 		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     			echo -e "Not doing anything."
@@ -253,9 +254,68 @@ get_cities() {
 connect() {
 	verify_root
 
-	local server
+	local server hostname public_key config private_key wg_config wg_config_file interface wg_if_file
 	server=$1
+
+	# extract hostname
+	hostname=$(printf %s "$server" | jq -r '.hostname')
+	if [[ "$hostname" == "" ]] || [[ "$hostname" == "null" ]]; then
+		echoexit "error: invalid server hostname."
+	fi
+
+	# extract public key
+	public_key=$(printf %s "$server" | jq -r --argjson wi "$NORDVPN_WG_ID" '.technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')
+	if [[ "$public_key" == "" ]] || [[ "$public_key" == "null" ]]; then
+		echoexit "error: invalid server public key."
+	fi
+
+	# read config file
+	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
 	
+	# extract private key
+	private_key=$(printf %s "$config" | jq -r '.private_key')
+	if [[ "$private_key" == "" ]] || [[ "$private_key" == "null" ]]; then
+		echoexit "error: invalid client private key."
+	fi
+	
+	# create wireguard config
+	wg_config="\n[Interface]"
+	wg_config+="\nPrivateKey = $private_key"
+	wg_config+="\nListenPort = 51820"
+	wg_config+="\n"
+	wg_config+="\n[Peer]"
+	wg_config+="\nPublicKey = $public_key"
+	wg_config+="\nAllowedIPs = 0.0.0.0/0"
+	wg_config+="\nEndpoint = $hostname:51820"
+	wg_config+="\n"
+
+	# wireguard config file name
+	wg_config_file="$NORDVPN_DIR/$(printf %s "$hostname" | cut -d "." -f 1).conf"
+
+	# write wireguard config
+	mkdir -p "$NORDVPN_DIR"
+	printf %b "$wg_config" > "$wg_config_file"
+	chmod 600 "$wg_config_file"
+
+	# extract interface
+	interface=$(printf %s "$config" | jq -r '.interface')
+	if [[ "$interface" == "" ]] || [[ "$interface" == "null" ]]; then
+		echoexit "error: invalid wireguard interface."
+	fi
+
+	# wireguard config file name
+	wg_if_file="$WIREGUARD_DIR/$interface.conf"
+	
+	# change interface symlink
+	rm "$wg_if_file"
+	ln -s "$wg_config_file" "$wg_if_file"
+
+	# log connection
+	printf %b "Connecting to server '$hostname'."
+	
+	# start wireguard interface
+	rc-service "net.$interface" stop
+	rc-service "net.$interface" start
 }
 
 # connect to server by id
@@ -295,7 +355,7 @@ connect_to_recommended_country() {
 	country=$1
 
 	# extract country id
-	country_id=$(get_countries | jq --arg cc "$country" '.[] | select(.name == $cc) | .id')
+	country_id=$(get_countries | jq -r --arg cc "$country" '.[] | select(.name == $cc) | .id')
 
 	# request api for recommended server in given country
 	response=$(curl -s "$NORDVPN_API_RECOMMENDED_FULL&filters\[country_id\]=$country_id")	
@@ -314,7 +374,7 @@ connect_to_recommended_city() {
 	city=$2
 
 	# extract city id
-	city_id=$(get_cities "$country" | jq --arg ct "$city" '.[] | select(.name == $ct) | .id')
+	city_id=$(get_cities "$country" | jq -r --arg ct "$city" '.[] | select(.name == $ct) | .id')
 	
 	# request api for recommended server in given city
 	response=$(curl -s "$NORDVPN_API_RECOMMENDED_FULL&filters\[country_city_id\]=$city_id")

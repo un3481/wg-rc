@@ -89,7 +89,7 @@ verify_token() {
 	if [[ "$response" == "" ]]; then
 		exit_invalid_token
 	fi
-	errors=$(printf %s "$response" | jq '.errors')
+	errors=$(printf %s "$response" | jq '.errors' 2>/dev/null)
 	if [[ "$errors" != "" ]] && [[ "$errors" != "null" ]]; then
 		exit_invalid_token
 	fi
@@ -112,7 +112,7 @@ verify_response() {
 	if [[ "$response" == "" ]]; then
 		echoexit "api_error: API call returned nothing."
 	fi	
-	errors=$(printf %s "$response" | jq '.errors')
+	errors=$(printf %s "$response" | jq '.errors' 2>/dev/null)
 	if [[ "$errors" != "" ]] && [[ "$errors" != "null" ]]; then
 		echoexit "api_error: API replied with errors: '$errors'."
 	fi
@@ -311,7 +311,7 @@ connect() {
 	ln -s "$wg_config_file" "$wg_if_file"
 
 	# log connection
-	printf %b "Connecting to server '$hostname'."
+	printf %b "Connecting to server '$hostname'.\n"
 	
 	# start wireguard interface
 	rc-service "net.$interface" stop
@@ -384,6 +384,149 @@ connect_to_recommended_city() {
 	connect "$(printf %s "$response" | jq '.[]')"
 }
 
-# main
+# disconnect
+disconnect() {
+	verify_root
 
+	local config interface
+
+	# read config file
+	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
+	
+	# extract interface
+	interface=$(printf %s "$config" | jq -r '.interface')
+	if [[ "$interface" == "" ]] || [[ "$interface" == "null" ]]; then
+		echoexit "error: invalid wireguard interface."
+	fi
+
+	# stop wireguard interface
+	rc-service "net.$interface" stop
+}
+
+# main
+case $1 in
+	"--help")
+		echo -e ""
+		exit 0
+		;;
+	"get")
+		case $2 in
+			"--help")
+				echo -e ""
+				exit 0
+				;;
+			"countries")
+				get_countries | jq -r '.[] | .name'
+				exit 0
+				;;
+			"cities")
+				get_cities "$3" | jq -r '.[] | .name'
+				exit 0
+				;;
+			"")
+				echo -e "Too few arguments."
+				echo -e "Try 'nordvpn-rc get --help' to see available options."
+				exit 1
+				;;
+			*)
+				echo -e "Invalid argument '$2'."
+				echo -e "Try 'nordvpn-rc get --help' to see available options."
+				exit 1
+				;;
+		esac
+		;;
+	"set")
+		case $2 in
+			"--help")
+				echo -e ""
+				exit 0
+				;;
+			"token")
+				set_token "$3"
+				exit 0
+				;;
+			"interface")
+				set_interface "$3"
+				exit 0
+				;;
+			"")
+				echo -e "Too few arguments."
+				echo -e "Try 'nordvpn-rc set --help' to see available options."
+				exit 1
+				;;
+			*)
+				echo -e "Invalid argument '$2'."
+				echo -e "Try 'nordvpn-rc set --help' to see available options."
+				exit 1
+				;;
+		esac
+		;;
+	"connect")
+		case $2 in
+			"--help")
+				echo -e ""
+				exit 0
+				;;
+			"recommended")
+				connect_to_recommended
+				exit 0
+				;;
+			"id")
+				connect_by_id "$3"
+				exit 0
+				;;
+			"")
+				echo -e "Too few arguments."
+				echo -e "Try 'nordvpn-rc connect --help' to see available options."
+				exit 1
+				;;
+
+			*)
+				case $3 in
+					"recommended")
+						connect_to_recommended_country "$2"
+						exit 0
+						;;
+					"")
+						echo -e "Too few arguments."
+						echo -e "Try 'nordvpn-rc connect --help' to see available options."
+						exit 1
+						;;
+					*)
+						case $4 in
+							"recommended")
+								connect_to_recommended_city "$2" "$3"
+								exit 0
+								;;
+							"")
+								echo -e "Too few arguments."
+								echo -e "Try 'nordvpn-rc connect --help' to see available options."
+								exit 1
+								;;
+							*)
+								echo -e "Invalid argument '$4'."
+								echo -e "Try 'nordvpn-rc connect --help' to see available options."
+								exit 1
+								;;
+						esac
+						;;
+				esac
+				;;
+		esac
+		;;
+	"disconnect")
+		disconnect
+		exit 0
+		;;
+	"")
+		echo -e "Too few arguments."
+		echo -e "Try 'nordvpn-rc --help' to see available options."
+		exit 1
+		;;
+	*)
+		echo -e "Invalid argument '$1'."
+		echo -e "Try 'nordvpn-rc --help' to see available options."
+		exit 1
+		;;
+esac
 

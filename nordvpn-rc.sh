@@ -153,7 +153,7 @@ update_private_key() {
 	fi
 
 	# create new config
-	config=$(printf %s "$config" | jq --arg key "$private_key" '. | .private_key = $key')
+	config=$(printf %s "$config" | jq --arg key "$private_key" '.private_key = $key')
 
 	# write updated config file
 	mkdir -p "$NORDVPN_DIR"
@@ -181,7 +181,7 @@ set_token() {
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
 	
 	# create new config
-	config=$(printf %s "$config" | jq --arg tok "$token" '. | .token = $tok')
+	config=$(printf %s "$config" | jq --arg tok "$token" '.token = $tok')
 	
 	# write updated config file
 	mkdir -p "$NORDVPN_DIR"
@@ -219,7 +219,7 @@ set_interface() {
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
 	
 	# create new config
-	config=$(printf %s "$config" | jq --arg if "$interface" '. | .interface = $if')
+	config=$(printf %s "$config" | jq --arg if "$interface" '.interface = $if')
 	
 	# write updated config file
 	mkdir -p "$NORDVPN_DIR"
@@ -244,6 +244,7 @@ get_countries() {
 	printf %s "$countries"
 }
 
+# get cities from nordvpn
 get_cities() {
 	local country response cities
 	country=$1
@@ -259,11 +260,48 @@ get_cities() {
 	printf %s "$cities"
 }
 
+# print server info to terminal
+show_server() {
+	local server form cyan white normcyan boldcyan bold endcolor
+	server=$1
+
+	# check server
+	if [[ "$server" == "" ]] || [[ "$server" == "null" ]]; then
+		echoexit "error: invalid server json."
+	fi
+
+	# format colors
+	cyan="36"
+	white="97"
+	normcyan="\e[${cyan}m"
+	boldcyan="\e[1;${cyan}m"
+	bold="\e[1;${white}m"
+	endcolor="\e[0m"
+
+	# formattated output
+	form="${boldcyan}nordvpn${endcolor}: ${normcyan}$(printf %s "$server" | jq -r '.id')${endcolor}"
+	form+="\n  ${bold}name${endcolor}: $(printf %s "$server" | jq -r '.name')"
+	form+="\n  ${bold}hostname${endcolor}: $(printf %s "$server" | jq -r '.hostname')"
+	form+="\n  ${bold}station${endcolor}: $(printf %s "$server" | jq -r '.station')"
+	form+="\n  ${bold}public key${endcolor}: $(printf %s "$server" | jq -r --argjson wi "$NORDVPN_WG_ID" '.technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')"	
+	form+="\n  ${bold}groups${endcolor}: $(printf %s "$server" | jq -r '.groups | map(.title) | join(", ")')"
+	form+="\n  ${bold}created at${endcolor}: $(printf %s "$server" | jq -r '.created_at')"
+	form+="\n  ${bold}country${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.name')"
+	form+="\n  ${bold}city${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.city.name')"
+	form+="\n  ${bold}latitude${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.city.latitude')"
+	form+="\n  ${bold}longitude${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.city.longitude')"
+	form+="\n  ${bold}hub score${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.city.hub_score')"
+	form+="\n  ${bold}load${endcolor}: $(printf %s "$server" | jq -r '.load')"
+
+	# Print server info to terminal
+	echo -e "$form"
+}
+
 # get status of current wireguard connection
 get_status() {
 	verify_root
 
-	local config interface wg_if_file wg_if file_comm server_id response
+	local config interface wg_if_file wg_if file_comm server_id response server_ip server_key if_endpoint if_ip if_key
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
@@ -298,31 +336,30 @@ get_status() {
 	response=$(curl -s "$NORDVPN_API_SERVERS_STATUS&filters\[servers.id\]=$server_id")
 	verify_response "$response"
 
-	local form cyan white normcyan boldcyan bold endcolor
-	cyan="36"
-	white="97"
-	normcyan="\e[${cyan}m"
-	boldcyan="\e[1;${cyan}m"
-	bold="\e[1;${white}m"
-	endcolor="\e[0m"
+	# get server info
+	server_ip="$(printf %s "$response" | jq -r '.[].station')"
+	server_key="$(printf %s "$response" | jq -r --argjson wi "$NORDVPN_WG_ID" '.[].technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')"
 
-	form="${boldcyan}nordvpn${endcolor}: ${normcyan}$server_id${endcolor}"
-	form+="\n ${bold}name${endcolor}: $(printf %s "$response" | jq -r '.[] | .name')"
-	form+="\n ${bold}hostname${endcolor}: $(printf %s "$response" | jq -r '.[] | .hostname')"
-	form+="\n ${bold}station${endcolor}: $(printf %s "$response" | jq -r '.[] | .station')"	
-	form+="\n ${bold}load${endcolor}: $(printf %s "$response" | jq -r '.[] | .load')"
-	form+="\n ${bold}created at${endcolor}: $(printf %s "$response" | jq -r '.[] | .created_at')"
-	form+="\n ${bold}groups${endcolor}: $(printf %s "$response" | jq -r '.[] | .groups | map(.title) | join(", ")')"
-	form+="\n ${bold}country${endcolor}: $(printf %s "$response" | jq -r '.[] | .locations[] | .country.name')"
-	form+="\n ${bold}city${endcolor}: $(printf %s "$response" | jq -r '.[] | .locations[] | .country.city.name')"
-	form+="\n ${bold}latitude${endcolor}: $(printf %s "$response" | jq -r '.[] | .locations[] | .country.city.latitude')"
-	form+="\n ${bold}longitude${endcolor}: $(printf %s "$response" | jq -r '.[] | .locations[] | .country.city.longitude')"
-	form+="\n ${bold}hub score${endcolor}: $(printf %s "$response" | jq -r '.[] | .locations[] | .country.city.hub_score')"
-	form+="\n"
+	# get interface info
+	if_endpoint="$(wg show "$interface" endpoints 2>/dev/null)"
+	if_ip="$(printf %s "$if_endpoint" | sed -r 's/[[:blank:]]+/ /g' | cut -d " " -f 2 | cut -d ":" -f 1)"
+	if_key="$(printf %s "$if_endpoint" | sed -r 's/[[:blank:]]+/ /g' | cut -d " " -f 1)"
 
-	# Print server info to terminal
-	echo -e "$form"
-	# Print wg info bellow server info 
+	# check if server matches interface
+	if [[ "$server_ip" != "$if_ip" ]] || [[ "$server_key" != "$if_key" ]]; then
+		echo -e "status: disconnected"
+		exit 0
+	fi
+
+	# print status
+	echo -e "status: connected"
+	echo -e ""
+
+	# show server
+	show_server "$(printf %s "$response" | jq '.[]')"
+
+	# Print wg info bellow server info
+	echo -e ""
 	wg show "$interface"
 }
 
@@ -397,7 +434,7 @@ connect() {
 	ln -s "$wg_config_file" "$wg_if_file"
 
 	# log connection
-	printf %b "Connecting to server '$hostname'.\n"
+	echo -e "Connecting to server '$hostname'."
 	
 	# start wireguard interface
 	rc-service "net.$interface" stop

@@ -320,8 +320,9 @@ get_status() {
 	form+="\n ${bold}hub score${endcolor}: $(printf %s "$response" | jq -r '.[] | .locations[] | .country.city.hub_score')"
 	form+="\n"
 
+	# Print server info to terminal
 	echo -e "$form"
-
+	# Print wg info bellow server info 
 	wg show "$interface"
 }
 

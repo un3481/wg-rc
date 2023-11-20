@@ -353,14 +353,14 @@ get_status() {
 
 	# print status
 	echo -e "status: connected"
+	echo -e ""	
+
+	# Print wg info bellow server info
+	wg show "$interface"
 	echo -e ""
 
 	# show server
 	show_server "$(printf %s "$response" | jq '.[]')"
-
-	# Print wg info bellow server info
-	echo -e ""
-	wg show "$interface"
 }
 
 # connect to given wireguard server

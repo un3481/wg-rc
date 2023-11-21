@@ -41,35 +41,35 @@ NORDVPN_API_RECOMMENDED="$NORDVPN_API_BASE/v1/servers/recommendations"
 # id of wireguard servers
 NORDVPN_WG_ID="35"
 
-# api servers query
-NORDVPN_API_SERVERS_QUERY="filters\[servers.status\]=online"
-NORDVPN_API_SERVERS_QUERY+="&filters\[servers_technologies\]\[id\]=$NORDVPN_WG_ID"
-NORDVPN_API_SERVERS_QUERY+="&filters\[servers_technologies\]\[pivot\]\[status\]=online"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.id\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.name\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.hostname\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.station\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.load\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.groups.id\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.technologies.id\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.technologies.metadata\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.locations.country.id\]"
-NORDVPN_API_SERVERS_QUERY+="&fields\[servers.locations.country.city.id\]"
+# api servers filters
+NORDVPN_API_SERVERS_FILTERS="filters\[servers.status\]=online"
+NORDVPN_API_SERVERS_FILTERS+="&filters\[servers_technologies\]\[id\]=$NORDVPN_WG_ID"
+NORDVPN_API_SERVERS_FILTERS+="&filters\[servers_technologies\]\[pivot\]\[status\]=online"
+
+# api servers fields
+NORDVPN_API_SERVERS_FIELDS="fields\[servers.id\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.name\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.hostname\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.station\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.load\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.created_at\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.groups.id\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.groups.title\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.technologies.id\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.technologies.metadata\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.id\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.name\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.id\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.name\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.latitude\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.longitude\]"
+NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.hub_score\]"
 
 # servers query
-NORDVPN_API_SERVERS_FULL="$NORDVPN_API_SERVERS?limit=1&$NORDVPN_API_SERVERS_QUERY"
+NORDVPN_API_SERVERS_BASE="$NORDVPN_API_SERVERS?$NORDVPN_API_SERVERS_FIELDS&$NORDVPN_API_SERVERS_FILTERS"
 
 # recommended servers query
-NORDVPN_API_RECOMMENDED_FULL="$NORDVPN_API_RECOMMENDED?limit=1&$NORDVPN_API_SERVERS_QUERY"
-
-NORDVPN_API_SERVERS_STATUS="$NORDVPN_API_SERVERS?limit=1&$NORDVPN_API_SERVERS_QUERY"
-NORDVPN_API_SERVERS_STATUS+="&fields\[servers.created_at\]"
-NORDVPN_API_SERVERS_STATUS+="&fields\[servers.groups.title\]"
-NORDVPN_API_SERVERS_STATUS+="&fields\[servers.locations.country.name\]"
-NORDVPN_API_SERVERS_STATUS+="&fields\[servers.locations.country.city.name\]"
-NORDVPN_API_SERVERS_STATUS+="&fields\[servers.locations.country.city.latitude\]"
-NORDVPN_API_SERVERS_STATUS+="&fields\[servers.locations.country.city.longitude\]"
-NORDVPN_API_SERVERS_STATUS+="&fields\[servers.locations.country.city.hub_score\]"
+NORDVPN_API_RECOMMENDED_BASE="$NORDVPN_API_RECOMMENDED?$NORDVPN_API_SERVERS_FIELDS&$NORDVPN_API_SERVERS_FILTERS"
 
 # verify if user has root privileges
 verify_root() {
@@ -297,20 +297,12 @@ show_server() {
 	echo -e "$form"
 }
 
-# get status of current wireguard connection
-get_status() {
+# get server id from file
+get_server_id() {
 	verify_root
 
-	local config interface wg_if_file wg_if file_comm server_id response server_ip server_key if_endpoint if_ip if_key
-
-	# read config file
-	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
-	
-	# extract interface
-	interface=$(printf %s "$config" | jq -r '.interface')
-	if [[ "$interface" == "" ]] || [[ "$interface" == "null" ]]; then
-		echoexit "error: invalid wireguard interface."
-	fi
+	local interface wg_if_file wg_if line server_id
+	interface=$1
 
 	# wireguard config file name
 	wg_if_file="$WIREGUARD_DIR/$interface.conf"
@@ -324,43 +316,212 @@ get_status() {
 	wg_if="$(cat "$wg_if_file" 2>/dev/null)"
 
 	# check for comment in file
-	file_comm="$(printf %b "$wg_if" | grep "^# SERVER_ID = " 2>/dev/null)"
-	if [[ "$file_comm" == "" ]]; then
-		echoexit "error: invalid wireguard config file '$wg_if_file'."
+	line="$(printf %b "$wg_if" | grep "^# SERVER_ID = " 2>/dev/null)"
+	if [[ "$line" == "" ]]; then
+		echoexit "error: invalid wireguard config '$wg_if_file'."
 	fi
 
 	# extract server id
-	server_id="$(printf %s "$file_comm" | cut -d "=" -f 2 | sed "s/\ //g")"
+	server_id="$(printf %s "$line" | cut -d "=" -f 2 | sed -r "s/\ //g")"
+	
+	# return server id
+	printf %s "$server_id"
+}
 
-	# request api for server with given id
-	response=$(curl -s "$NORDVPN_API_SERVERS_STATUS&filters\[servers.id\]=$server_id")
-	verify_response "$response"
+# get server hostname from file
+get_server_hostname() {
+	verify_root
+
+	local interface wg_if_file wg_if line hostname
+	interface=$1
+
+	# wireguard config file name
+	wg_if_file="$WIREGUARD_DIR/$interface.conf"
+	
+	# check if file exists
+	if ! test -f "$wg_if_file"; then
+		echoexit "error: no interface config file found."
+	fi
+
+	# change interface symlink
+	wg_if="$(cat "$wg_if_file" 2>/dev/null)"
+
+	# check for entry in file
+	line="$(printf %b "$wg_if" | grep "^Endpoint = " 2>/dev/null)"
+	if [[ "$line" == "" ]]; then
+		echoexit "error: invalid wireguard config '$wg_if_file'."
+	fi
+
+	# extract server hostname
+	hostname="$(printf %s "$line" | cut -d "=" -f 2 | sed -r "s/\ //g" | cut -d ":" -f 1)"
+	
+	# return server hostname
+	printf %s "$hostname"
+}
+
+# check if wireguard conifg matches connected interface
+peer_online() {
+	verify_root
+
+	local interface server server_ip server_key if_endpoint if_ip if_key
+	interface=$1
+	server=$2
 
 	# get server info
-	server_ip="$(printf %s "$response" | jq -r '.[].station')"
-	server_key="$(printf %s "$response" | jq -r --argjson wi "$NORDVPN_WG_ID" '.[].technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')"
+	server_ip="$(printf %s "$server" | jq -r '.station')"
+	server_key="$(printf %s "$server" | jq -r --argjson wi "$NORDVPN_WG_ID" '.technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')"
 
 	# get interface info
 	if_endpoint="$(wg show "$interface" endpoints 2>/dev/null)"
 	if_ip="$(printf %s "$if_endpoint" | sed -r 's/[[:blank:]]+/ /g' | cut -d " " -f 2 | cut -d ":" -f 1)"
 	if_key="$(printf %s "$if_endpoint" | sed -r 's/[[:blank:]]+/ /g' | cut -d " " -f 1)"
 
-	# check if server matches interface
-	if [[ "$server_ip" != "$if_ip" ]] || [[ "$server_key" != "$if_key" ]]; then
-		echo -e "status: disconnected"
-		exit 0
+	# print result of match
+	if [[ "$server_ip" == "$if_ip" ]] && [[ "$server_key" == "$if_key" ]]; then
+		printf %s "online"
+	else
+		printf %s "offline"
+	fi
+}
+
+# get status of current wireguard connection
+get_status() {
+	verify_root
+
+	local config interface server_id response server if_pub_key if_stts peer_stts con_stts
+
+	# read config file
+	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
+	
+	# extract interface
+	interface=$(printf %s "$config" | jq -r '.interface')
+	if [[ "$interface" == "" ]] || [[ "$interface" == "null" ]]; then
+		echoexit "error: invalid wireguard interface."
+	fi
+	
+	# extract server id
+	server_id="$(get_server_id "$interface")"
+
+	# request api for server with given id
+	response=$(curl -s "$NORDVPN_API_SERVERS_BASE&filters\[servers.id\]=$server_id&limit=1")
+	verify_response "$response"
+
+	# extract server
+	server="$(printf %s "$response" | jq '.[]')"
+
+	# check if interface is connected to given server
+	if_pub_key="$(wg show "$interface" public-key 2>/dev/null)"
+	if [[ "$if_pub_key" == "" ]]; then
+		if_stts="down"
+	else
+		if_stts="up"
+	fi
+
+	# check if remote matches interface
+	peer_stts="none"
+	if [[ "$if_stts" == "up" ]]; then
+		peer_stts="$(peer_online "$interface" "$server")"
+	fi
+
+	# check if interface is connected to given server
+	if [[ "$if_stts" == "up" ]] && [[ "$peer_stts" == "online" ]]; then
+		con_stts="connected"
+	else
+		con_stts="disconnected"
 	fi
 
 	# print status
-	echo -e "status: connected"
-	echo -e ""	
+	echo -e "status: $con_stts"
+	echo -e "  interface: $if_stts"
+	echo -e "  peer: $peer_stts"
 
-	# Print wg info bellow server info
-	wg show "$interface"
-	echo -e ""
+	# print info if interface is up
+	if [[ "$if_stts" == "up" ]]; then
+		# print wireguard info
+		echo -e ""
+		wg show "$interface"
+		
+		# print nordvpn server info
+		echo -e ""
+		show_server "$server"
+	fi
+}
 
-	# show server
-	show_server "$(printf %s "$response" | jq '.[]')"
+# wireguard postup script
+wg_postup() {
+	verify_root
+
+	local interface
+	interface=$1
+
+	echo -e "Runnning postup ..."
+
+	# After the interface is up, we add routing and firewall rules,
+	# which prevent packets from going through the normal routes, which are
+	# for "plaintext" packets.
+	# routing rules taken from: https://www.wireguard.com/netns/
+	# firewall rules taken from: man wg-quick
+	#
+	# If the connection to the VPN goes down, the firewall rule makes sure
+	# no other connections can be open, until you remove the interface
+	# using: rc-service net.wg0 stop
+	#
+	# For the nftables firewall rule to work, make sure you set:
+	# SAVE_ON_STOP="no"
+	# in: /etc/conf.d/nftables
+
+	# set a firewall mark for all wireguard packets
+	wg set "$interface" fwmark 334455 || exit 1
+	
+	# route all packets to the interface in table 2468
+	ip route add default dev "$interface" table 2468 || exit 1
+	
+	# if packet doesn't have the wireguard firewall mark,
+	# send it to table 2468
+	ip rule add not fwmark 334455 table 2468 || exit 1
+		
+	# if packet isn't going out the interface, doesn't have
+	# the wireguard firewall mark and isn't broadcast or multicast
+	# reject it (don't drop it like there's no connection)
+	nft add table ip filter
+	nft add chain ip filter output
+	nft insert rule ip filter output oifname!="wg0" mark!=334455 fib daddr type!=local counter reject || exit 1
+		
+	# Make sure only DNS server is the one from your provider or
+	# a custom one fitting your needs!
+	# If there is one, otherwise you can remove this line.
+	echo "nameserver 103.86.96.100" > /etc/resolv.conf || exit 1
+	echo "nameserver 103.86.99.100" >> /etc/resolv.conf || exit 1
+}
+
+# wireguard predown script
+wg_predown() {
+	verify_root
+
+	local interface
+	interface=$1
+
+	echo -e "Runnning predown ..."
+
+	# When bringing down the interface using rc-service, make sure that all
+	# rules specific to isolating the wireguard connections are gone, so
+	# that normal connections can work again.
+	# Change the DNS values for your setup!
+	
+	# Bringing back default nftables rules.
+	rc-service nftables reload || exit 1
+
+	# Removing wireguard specific routing rules.
+	ip route del default dev "$interface" table 2468 || exit 1
+	ip rule del not fwmark 334455 table 2468 || exit 1
+
+	# Bringing back your own DNS settings, in case they were
+	# changed in postup()
+	rc-service dhcpcd stop
+	rc-service dhcpcd start
+
+	#echo "nameserver 1.2.3.4" > /etc/resolv.conf || exit 1
+	#echo "nameserver 123.12.21.1" >> /etc/resolv.conf || exit 1
 }
 
 # connect to given wireguard server
@@ -433,85 +594,165 @@ connect() {
 	rm "$wg_if_file"
 	ln -s "$wg_config_file" "$wg_if_file"
 
-	# log connection
-	echo -e "Connecting to server '$hostname'."
+	# print connecting
+	echo -e "Connecting to server '$hostname' ..."
 	
 	# start wireguard interface
 	rc-service "net.$interface" stop
 	rc-service "net.$interface" start
+
+	# add wireguard firewall rules
+	wg_postup "$interface"
+	
+	# print connected
+	echo -e "Connected successfully!"
 }
 
 # connect to server by id
 connect_by_id() {
 	verify_root
 
-	local server_id
+	local server_id response server
 	server_id=$1
 	
 	# request api for server with given id
-	response=$(curl -s "$NORDVPN_API_SERVERS_FULL&filters\[servers.id\]=$server_id")
+	response=$(curl -s "$NORDVPN_API_SERVERS_BASE&filters\[servers.id\]=$server_id&limit=1")
 	verify_response "$response"
 
+	# extract server
+	server="$(printf %s "$response" | jq '.[]')"
+
 	# connect to server
-	connect "$(printf %s "$response" | jq '.[]')"
+	connect "$server"
 }
 
 # connect to recommended server
 connect_to_recommended() {
 	verify_root
 
-	local response
+	local filters response server
+	filters=$1
 
 	# request api for recommended server
-	response=$(curl -s "$NORDVPN_API_RECOMMENDED_FULL")
+	response=$(curl -s "$NORDVPN_API_RECOMMENDED_BASE&$filters&limit=1")
 	verify_response "$response"
 
+	# extract server
+	server="$(printf %s "$response" | jq '.[]')"
+
 	# connect to server
-	connect "$(printf %s "$response" | jq '.[]')"
+	connect "$server"
+}
+
+# connect to other server
+connect_to_other() {
+	verify_root
+
+	local filters config interface old_server_id response server server_id
+	filters=$1
+	
+	# read config file
+	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
+	
+	# extract interface
+	interface=$(printf %s "$config" | jq -r '.interface')
+	if [[ "$interface" == "" ]] || [[ "$interface" == "null" ]]; then
+		echoexit "error: invalid wireguard interface."
+	fi
+
+	# extract server id
+	old_server_id="$(get_server_id "$interface")"
+
+	# request api for recommended server
+	response=$(curl -s "$NORDVPN_API_RECOMMENDED_BASE&$filters&limit=2")
+	verify_response "$response"
+
+	# extract server
+	server="$(printf %s "$response" | jq '.[0]')"
+
+	# check id
+	server_id="$(printf %s "$server" | jq -r '.id')"
+	if [[ "$old_server_id" == "$server_id" ]]; then
+		server="$(printf %s "$response" | jq '.[1]')"
+	fi
+
+	# connect to server
+	connect "$server"
 }
 
 # connect to recommended server in given country
-connect_to_recommended_country() {
+connect_location() {
 	verify_root
 
-	local country country_id response
-	country=$1
-
-	# extract country id
-	country_id=$(get_countries | jq -r --arg cc "$country" '.[] | select(.name == $cc) | .id')
-
-	# request api for recommended server in given country
-	response=$(curl -s "$NORDVPN_API_RECOMMENDED_FULL&filters\[country_id\]=$country_id")	
-	verify_response "$response"
-
-	# connect to server
-	connect "$(printf %s "$response" | jq '.[]')"
-}
-
-# connect to recommended server in given city
-connect_to_recommended_city() {
-	verify_root
-
-	local country city city_id response
+	local country city filters
 	country=$1
 	city=$2
 
-	# extract city id
-	city_id=$(get_cities "$country" | jq -r --arg ct "$city" '.[] | select(.name == $ct) | .id')
+	# set filters
+	if [[ "$city" == "" ]]; then
+		if [[ "$country" == "" ]]; then
+			filters=""
+		else
+			local country_id
+			# extract country id
+			country_id=$(get_countries | jq -r --arg cc "$country" '.[] | select(.name == $cc) | .id')
+			if [[ "$country_id" == "" ]]; then
+				echoexit "error: invalid country."
+			fi
+			# set country filters
+			filters="filters\[country_id\]=$country_id"
+		fi
+	else
+			local city_id
+			# extract city id
+			city_id=$(get_cities "$country" | jq -r --arg ct "$city" '.[] | select(.name == $ct) | .id')
+			if [[ "$city_id" == "" ]]; then
+				echoexit "error: invalid country or city."
+			fi
+			# set country filters
+			filters="filters\[country_city_id\]=$city_id"
+	fi
 	
-	# request api for recommended server in given city
-	response=$(curl -s "$NORDVPN_API_RECOMMENDED_FULL&filters\[country_city_id\]=$city_id")
-	verify_response "$response"
-
-	# connect to server
-	connect "$(printf %s "$response" | jq '.[]')"
+	# return filters
+	printf %s "$filters"
 }
 
 # disconnect
-disconnect() {
+wg_disconnect() {
 	verify_root
 
-	local config interface
+	local config interface server_id response server hostname
+
+	# read config file
+	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
+	
+	# extract interface
+	interface=$(printf %s "$config" | jq -r '.interface')
+	if [[ "$interface" == "" ]] || [[ "$interface" == "null" ]]; then
+		echoexit "error: invalid wireguard interface."
+	fi
+	
+	# extract server hostname
+	hostname="$(get_server_hostname "$interface")"
+
+	# print disconnecting
+	echo -e "Disconnecting from server '$hostname' ..."
+	
+	# remove wireguard firewall rules
+	wg_predown "$interface"
+
+	# stop wireguard interface
+	rc-service "net.$interface" stop
+
+	# print disconnected
+	echo -e "Disconnected successfully!"
+}
+
+# restart
+wg_restart() {
+	verify_root
+
+	local config interface hostname
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
@@ -522,147 +763,203 @@ disconnect() {
 		echoexit "error: invalid wireguard interface."
 	fi
 
-	# stop wireguard interface
+	# extract server hostname
+	hostname="$(get_server_hostname "$interface")"
+
+	# print restarting
+	echo -e "Restarting connection to server '$hostname' ..."
+
+	# restart wireguard interface
 	rc-service "net.$interface" stop
+	rc-service "net.$interface" start
+
+	# print restarted
+	echo -e "Restarted successfully!"
+}
+
+# error wrong number of args
+exit_args() {
+	local mod
+	mod="$(printf %s " $2 " | sed -r 's/[[:blank:]]+/ /g')"
+	echo -e "Too $1 arguments."
+	echo -e "Try 'nordvpn-rc$mod--help' to see available options."
+	exit 1
 }
 
 # main
-case $1 in
-	"--help")
+[ $# -lt 1 ] && exit_args "few" ""
+m_opt=$1
+shift
+case "$m_opt" in
+	"-h" | "--help")
+		[ $# -gt 0 ] && exit_args "many" ""
 		echo -e ""
 		echo -e "NordVPN client using WireGuard and Netifrc."
-		echo -e "Usage: nordvpn-rc [global-options] [module-options]"
+		echo -e "Usage: nordvpn-rc <action> <options>"
 		echo -e ""
-		echo -e "global options"
-		echo -e " -h, --help    display this help message"
-		echo -e " (g)et         get info from VPN provider"
-		echo -e " (s)et         set config"
-		echo -e " (c)onnect     connect to VPN"
-		echo -e " (d)isconnect  disconnect from VPN"
+		echo -e "actions:"
+		echo -e "  -h, --help    display this help message"
+		echo -e "  (g)et         get info from VPN provider"
+		echo -e "  (s)et         set config"
+		echo -e "  (c)onnect     connect to server"
+		echo -e "  (d)isconnect  disconnect from server"
+		echo -e "  (r)estart     restart current connection"
 		echo -e ""
-		echo -e "To see module options run 'nordvpn-rc [global-options] --help'"
+		echo -e "To see options run 'nordvpn-rc <action> --help'"
+		echo -e ""
 		exit 0
 		;;
-	"get")
-		case $2 in
-			"--help")
+	"g" | "get")
+		[ $# -lt 1 ] && exit_args "few" "get"
+		g_opt=$1
+		shift
+		case "$g_opt" in
+			"-h" | "--help")
+				[ $# -gt 0 ] && exit_args "many" "get"
+				echo -e ""
+				echo -e "NordVPN client using WireGuard and Netifrc."
+				echo -e "Action: get"
+				echo -e "Usage: nordvpn-rc get <options>"
+				echo -e ""
+				echo -e "options:"
+				echo -e "  -h, --help  display this help message"
+				echo -e "  countries   get country list from VPN provider"
+				echo -e "  cities      get city list from VPN provider"
+				echo -e "  status      get current VPN status"
 				echo -e ""
 				exit 0
 				;;
 			"countries")
-				get_countries | jq -r '.[] | .name'
+				[ $# -gt 0 ] && exit_args "many" "get"
+				get_countries | jq -r '.[].name'
 				exit 0
 				;;
 			"cities")
-				get_cities "$3" | jq -r '.[] | .name'
+				[ $# -lt 1 ] && exit_args "few" "get"
+				country=$1
+				shift
+				[ $# -gt 0 ] && exit_args "many" "get"
+				get_cities "$country" | jq -r '.[].name'
 				exit 0
 				;;
 			"status")
+				[ $# -gt 0 ] && exit_args "many" "get"
 				get_status
 				exit 0
 				;;
-			"")
-				echo -e "Too few arguments."
-				echo -e "Try 'nordvpn-rc get --help' to see available options."
-				exit 1
-				;;
 			*)
-				echo -e "Invalid argument '$2'."
+				echo -e "Invalid argument '$g_opt'."
 				echo -e "Try 'nordvpn-rc get --help' to see available options."
 				exit 1
 				;;
 		esac
 		;;
-	"set")
-		case $2 in
-			"--help")
+	"s" | "set")
+		[ $# -lt 1 ] && exit_args "few" "set"
+		s_opt=$1
+		shift
+		case "$s_option" in
+			"-h" | "--help")
+				[ $# -gt 0 ] && exit_args "many" "set"
+				echo -e ""
+				echo -e "NordVPN client using WireGuard and Netifrc."
+				echo -e "Action: set"
+				echo -e "Usage: nordvpn-rc set <options>"
+				echo -e ""
+				echo -e "options:"
+				echo -e "  -h, --help     display this help message"
+				echo -e "  token          set the token given by VPN provider"
+				echo -e "  if, interface  set the name of the wireguard interface"
 				echo -e ""
 				exit 0
 				;;
 			"token")
-				set_token "$3"
+				[ $# -lt 1 ] && exit_args "few" "set"
+				token=$1
+				shift
+				[ $# -gt 0 ] && exit_args "many" "set"
+				set_token "$token"
 				exit 0
 				;;
-			"interface")
-				set_interface "$3"
+			"if" | "interface")
+				[ $# -lt 1 ] && exit_args "few" "set"
+				interface=$1
+				shift
+				[ $# -gt 0 ] && exit_args "many" "set"
+				set_interface "$interface"
 				exit 0
-				;;
-			"")
-				echo -e "Too few arguments."
-				echo -e "Try 'nordvpn-rc set --help' to see available options."
-				exit 1
 				;;
 			*)
-				echo -e "Invalid argument '$2'."
+				echo -e "Invalid argument '$s_opt'."
 				echo -e "Try 'nordvpn-rc set --help' to see available options."
 				exit 1
 				;;
 		esac
 		;;
-	"connect")
-		case $2 in
-			"--help")
+	"c" | "cr" | "co" | "connect")
+		case "$m_opt" in
+			"cr") c_opt="r" ;;
+			"co") c_opt="o" ;;
+			*)
+				[ $# -lt 1 ] && exit_args "few" "connect"
+				c_opt=$1
+				shift
+				;;
+		esac
+		case "$c_opt" in
+			"-h" | "--help")
+				[ $# -gt 0 ] && exit_args "many" "connect"
+				echo -e ""
+				echo -e "NordVPN client using WireGuard and Netifrc."
+				echo -e "Action: connect"
+				echo -e "Usage: nordvpn-rc connect <options>"
+				echo -e ""
+				echo -e "options:"
+				echo -e "  -h, --help      display this help message"
+				echo -e "  (r)recommended  connect to a server recommended by the VPN provider"
+				echo -e "  (o)ther         connect to a different server than the current one"
+				echo -e "  <id|hostname>   connect to a server with given <id> or <hostname>"
 				echo -e ""
 				exit 0
 				;;
-			"recommended")
-				connect_to_recommended
+			"r" | "recommended")
+				[ $# -lt 1 ] && country="" || country=$1 && shift 2>/dev/null
+				[ $# -lt 1 ] && city="" || city=$1 && shift 2>/dev/null
+				[ $# -gt 0 ] && exit_args "many" "connect"
+				connect_to_recommended "$(connect_location "$country" "$city")"
 				exit 0
 				;;
-			"id")
-				connect_by_id "$3"
+			"o" | "other")
+				[ $# -lt 1 ] && country="" || country=$1 && shift 2>/dev/null
+				[ $# -lt 1 ] && city="" || city=$1 && shift 2>/dev/null
+				[ $# -gt 0 ] && exit_args "many" "connect"
+				connect_to_other "$(connect_location "$country" "$city")"
 				exit 0
 				;;
-			"")
-				echo -e "Too few arguments."
-				echo -e "Try 'nordvpn-rc connect --help' to see available options."
-				exit 1
-				;;
-
 			*)
-				case $3 in
-					"recommended")
-						connect_to_recommended_country "$2"
-						exit 0
-						;;
-					"")
-						echo -e "Too few arguments."
-						echo -e "Try 'nordvpn-rc connect --help' to see available options."
-						exit 1
-						;;
-					*)
-						case $4 in
-							"recommended")
-								connect_to_recommended_city "$2" "$3"
-								exit 0
-								;;
-							"")
-								echo -e "Too few arguments."
-								echo -e "Try 'nordvpn-rc connect --help' to see available options."
-								exit 1
-								;;
-							*)
-								echo -e "Invalid argument '$4'."
-								echo -e "Try 'nordvpn-rc connect --help' to see available options."
-								exit 1
-								;;
-						esac
-						;;
-				esac
+				[ $# -gt 0 ] && exit_args "many" "connect"
+				num_re='^[0-9]+$'
+				if [[ $c_opt =~ $num_re ]]; then
+					connect_by_id "$c_opt"
+				else
+					connect_by_hostname "$c_opt"
+				fi
+				exit 0
 				;;
 		esac
 		;;
-	"disconnect")
-		disconnect
+	"d" | "disconnect")
+		[ $# -gt 0 ] && exit_args "many" "disconnect"
+		wg_disconnect
 		exit 0
 		;;
-	"")
-		echo -e "Too few arguments."
-		echo -e "Try 'nordvpn-rc --help' to see available options."
-		exit 1
+	"r" | "restart")
+		[ $# -gt 0 ] && exit_args "many" "restart"
+		wg_restart
+		exit 0
 		;;
 	*)
-		echo -e "Invalid argument '$1'."
+		echo -e "Invalid argument '$m_opt'."
 		echo -e "Try 'nordvpn-rc --help' to see available options."
 		exit 1
 		;;

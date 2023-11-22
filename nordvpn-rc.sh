@@ -23,7 +23,17 @@ whereis rc-service > /dev/null || echoexit "'rc-service' not found."
 # constants
 
 TMPDIR="/tmp"
-DB_FILE="$TMPDIR/nordvpn-rc-db"
+NOINTERACT="0"
+
+# format colors
+GREEN="\e[32m"
+RED="\e[31m"
+CYAN="\e[36m"
+BGREEN="\e[1;32m"
+BRED="\e[1;31m"
+BCYAN="\e[1;36m"
+BOLD="\e[1;97m"
+ENDC="\e[0m"
 
 # config files
 WIREGUARD_DIR="/etc/wireguard"
@@ -74,15 +84,10 @@ NORDVPN_API_RECOMMENDED_BASE="$NORDVPN_API_RECOMMENDED?$NORDVPN_API_SERVERS_FIEL
 # verify if user has root privileges
 verify_root() {
 	if [ "$(id -u)" != "0" ]; then
-   		exit_non_root
+		echo -e "This command requires administrative privileges."
+		echo -e "Try '${BOLD}sudo nordvpn-rc <options>${ENDC}' or login as root."
+		exit 1
 	fi
-}
-
-# print error message for insufficient privileges and exit
-exit_non_root() {
-	echo -e "This command requires administrative privileges."
-	echo -e "Try 'sudo nordvpn-rc <your-args-go-here>' or login as root."
-	exit 1
 }
 
 # verify if token is valid on remote
@@ -108,7 +113,7 @@ verify_token() {
 exit_invalid_token() {
 	echo -e "You have not set a valid nordvpn access token."
 	echo -e "Please follow the instructions to obtain a new token: https://support.nordvpn.com/Connectivity/Linux/1905092252/How-to-log-in-to-NordVPN-on-Linux-with-a-token.htm"
-	echo -e "Once you have copied your token, you can use it by running 'nordvpn-rc set token <your-token-goes-here>'."
+	echo -e "Once you have copied your token, you can use it by running '${BOLD}nordvpn-rc set token <value>${ENDC}'."
 	exit 1
 }
 
@@ -206,11 +211,15 @@ set_interface() {
 
 	# check for existing config file
 	wg_if_file="$WIREGUARD_DIR/$interface.conf"
-	if test -f "$wg_if_file"; then
+	if [[ "$NOINTERACT" == "0" ]] && test -f "$wg_if_file"; then
+		echo -e ""
 		echo -e "File '$wg_if_file' already exists."
-		read -p "Do you want to override it? [Yes/No] " -r
+		echo -e ""
+		read -p "${BOLD}Do you want to override it?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] " -r
+		echo -e ""
 		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
     			echo -e "Not doing anything."
+			echo -e ""
 			exit 0
 		fi
 	fi
@@ -226,7 +235,8 @@ set_interface() {
 	echo "$config" > "$NORDVPN_CONFIG"
 	chmod 600 "$NORDVPN_CONFIG"
 
-	echo -e "Interface '$interface' configured."
+	echo -e "Interface '$interface' configured successfully!"
+	echo -e ""
 }
 
 # get countries from nordvpn
@@ -254,7 +264,7 @@ get_cities() {
 	verify_response "$response"
 
 	# extract city name and id
-	cities=$(printf %s "$response" | jq --arg cc "$country" '.[] | select(.name == $cc) | .cities | map({id: .id, name: .name})')
+	cities=$(printf %s "$response" | jq --arg cc "$country" '.[] | select((.name|ascii_upcase) == ($cc|ascii_upcase)) | .cities | map({id: .id, name: .name})')
 
 	# return response
 	printf %s "$cities"
@@ -270,31 +280,20 @@ show_server() {
 		echoexit "error: invalid server json."
 	fi
 
-	# format colors
-	cyan="36"
-	white="97"
-	normcyan="\e[${cyan}m"
-	boldcyan="\e[1;${cyan}m"
-	bold="\e[1;${white}m"
-	endcolor="\e[0m"
-
-	# formattated output
-	form="${boldcyan}nordvpn${endcolor}: ${normcyan}$(printf %s "$server" | jq -r '.id')${endcolor}"
-	form+="\n  ${bold}name${endcolor}: $(printf %s "$server" | jq -r '.name')"
-	form+="\n  ${bold}hostname${endcolor}: $(printf %s "$server" | jq -r '.hostname')"
-	form+="\n  ${bold}station${endcolor}: $(printf %s "$server" | jq -r '.station')"
-	form+="\n  ${bold}public key${endcolor}: $(printf %s "$server" | jq -r --argjson wi "$NORDVPN_WG_ID" '.technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')"	
-	form+="\n  ${bold}groups${endcolor}: $(printf %s "$server" | jq -r '.groups | map(.title) | join(", ")')"
-	form+="\n  ${bold}created at${endcolor}: $(printf %s "$server" | jq -r '.created_at')"
-	form+="\n  ${bold}country${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.name')"
-	form+="\n  ${bold}city${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.city.name')"
-	form+="\n  ${bold}latitude${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.city.latitude')"
-	form+="\n  ${bold}longitude${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.city.longitude')"
-	form+="\n  ${bold}hub score${endcolor}: $(printf %s "$server" | jq -r '.locations[].country.city.hub_score')"
-	form+="\n  ${bold}load${endcolor}: $(printf %s "$server" | jq -r '.load')"
-
-	# Print server info to terminal
-	echo -e "$form"
+	# print formattated output
+	echo -e "${BCYAN}nordvpn${ENDC}: ${CYAN}$(printf %s "$server" | jq -r '.id')${ENDC}"
+	echo -e "  ${BOLD}name${ENDC}: $(printf %s "$server" | jq -r '.name')"
+	echo -e "  ${BOLD}hostname${ENDC}: $(printf %s "$server" | jq -r '.hostname')"
+	echo -e "  ${BOLD}station${ENDC}: $(printf %s "$server" | jq -r '.station')"
+	echo -e "  ${BOLD}public key${ENDC}: $(printf %s "$server" | jq -r --argjson wi "$NORDVPN_WG_ID" '.technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')"	
+	echo -e "  ${BOLD}groups${ENDC}: $(printf %s "$server" | jq -r '.groups | map(.title) | join(", ")')"
+	echo -e "  ${BOLD}created at${ENDC}: $(printf %s "$server" | jq -r '.created_at')"
+	echo -e "  ${BOLD}country${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.name')"
+	echo -e "  ${BOLD}city${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.city.name')"
+	echo -e "  ${BOLD}latitude${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.city.latitude')"
+	echo -e "  ${BOLD}longitude${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.city.longitude')"
+	echo -e "  ${BOLD}hub score${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.city.hub_score')"
+	echo -e "  ${BOLD}load${ENDC}: $(printf %s "$server" | jq -r '.load')"
 }
 
 # get server id from file
@@ -388,7 +387,7 @@ peer_online() {
 get_status() {
 	verify_root
 
-	local config interface server_id response server if_pub_key if_stts peer_stts con_stts
+	local config interface server_id response server if_pub_key if_stts peer_stts conn_stts
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
@@ -420,27 +419,37 @@ get_status() {
 	# check if remote matches interface
 	peer_stts="none"
 	if [[ "$if_stts" == "up" ]]; then
-		peer_stts="$(peer_online "$interface" "$server")"
+		peer_stts=$(peer_online "$interface" "$server") || exit $?
 	fi
 
 	# check if interface is connected to given server
 	if [[ "$if_stts" == "up" ]] && [[ "$peer_stts" == "online" ]]; then
-		con_stts="connected"
+		conn_stts="connected"
 	else
-		con_stts="disconnected"
+		conn_stts="disconnected"
+	fi
+	
+	local stts_color conn_color
+
+	# conditional color
+	if [[ "$conn_stts" == "connected" ]]; then
+		stts_color="$BCYAN"
+		conn_color="$CYAN"
+	else
+		stts_color="$BRED"
+		conn_color="$RED"
 	fi
 
 	# print status
-	echo -e "status: $con_stts"
-	echo -e "  interface: $if_stts"
-	echo -e "  peer: $peer_stts"
+	echo -e "${stts_color}status${ENDC}: ${conn_color}$conn_stts${ENDC}"
+	echo -e "  ${BOLD}interface${ENDC}: $if_stts"
+	echo -e "  ${BOLD}peer${ENDC}: $peer_stts"
 
 	# print info if interface is up
 	if [[ "$if_stts" == "up" ]]; then
 		# print wireguard info
 		echo -e ""
 		wg show "$interface"
-		
 		# print nordvpn server info
 		echo -e ""
 		show_server "$server"
@@ -454,7 +463,7 @@ wg_postup() {
 	local interface
 	interface=$1
 
-	echo -e "Runnning postup ..."
+	echo -e "Running postup ..."
 
 	# After the interface is up, we add routing and firewall rules,
 	# which prevent packets from going through the normal routes, which are
@@ -501,7 +510,7 @@ wg_predown() {
 	local interface
 	interface=$1
 
-	echo -e "Runnning predown ..."
+	echo -e "Running predown ..."
 
 	# When bringing down the interface using rc-service, make sure that all
 	# rules specific to isolating the wireguard connections are gone, so
@@ -517,11 +526,12 @@ wg_predown() {
 
 	# Bringing back your own DNS settings, in case they were
 	# changed in postup()
+	
+	echo "nameserver 1.2.3.4" > /etc/resolv.conf || exit 1
+	echo "nameserver 123.12.21.1" >> /etc/resolv.conf || exit 1
+
 	rc-service dhcpcd stop
 	rc-service dhcpcd start
-
-	#echo "nameserver 1.2.3.4" > /etc/resolv.conf || exit 1
-	#echo "nameserver 123.12.21.1" >> /etc/resolv.conf || exit 1
 }
 
 # connect to given wireguard server
@@ -581,6 +591,22 @@ connect() {
 	printf %b "$wg_config" > "$wg_config_file"
 	chmod 600 "$wg_config_file"
 
+	# ask for user confirmation
+	if [[ "$NOINTERACT" == "0" ]]; then
+		echo -e ""
+		echo -e "You will be ${GREEN}connected${ENDC} to server '${BOLD}$hostname${ENDC}'."
+		echo -e ""
+		show_server "$server"
+		echo -e ""
+		read -p "$(echo -e "${BOLD}Do you want to continue?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
+		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+			echo -e ""
+    			echo -e "Not doing anything."
+			echo -e ""
+			exit 0
+		fi
+	fi
+
 	# extract interface
 	interface=$(printf %s "$config" | jq -r '.interface')
 	if [[ "$interface" == "" ]] || [[ "$interface" == "null" ]]; then
@@ -595,17 +621,22 @@ connect() {
 	ln -s "$wg_config_file" "$wg_if_file"
 
 	# print connecting
-	echo -e "Connecting to server '$hostname' ..."
+	echo -e ""
+	echo -e "${GREEN}Connecting to server${ENDC} '${BGREEN}$hostname${ENDC}' ${GREEN}...${ENDC}"
 	
 	# start wireguard interface
+	echo -e ""
 	rc-service "net.$interface" stop
 	rc-service "net.$interface" start
 
 	# add wireguard firewall rules
+	echo -e ""
 	wg_postup "$interface"
 	
 	# print connected
-	echo -e "Connected successfully!"
+	echo -e ""
+	echo -e "${GREEN}Connected successfully!${ENDC}"
+	echo -e ""
 }
 
 # connect to server by id
@@ -661,19 +692,19 @@ connect_to_other() {
 	fi
 
 	# extract server id
-	old_server_id="$(get_server_id "$interface")"
+	old_server_id=$(get_server_id "$interface") || exit $?
 
 	# request api for recommended server
 	response=$(curl -s "$NORDVPN_API_RECOMMENDED_BASE&$filters&limit=2")
 	verify_response "$response"
 
 	# extract server
-	server="$(printf %s "$response" | jq '.[0]')"
+	server=$(printf %s "$response" | jq '.[0]')
 
 	# check id
-	server_id="$(printf %s "$server" | jq -r '.id')"
+	server_id=$(printf %s "$server" | jq -r '.id')
 	if [[ "$old_server_id" == "$server_id" ]]; then
-		server="$(printf %s "$response" | jq '.[1]')"
+		server=$(printf %s "$response" | jq '.[1]')
 	fi
 
 	# connect to server
@@ -693,9 +724,10 @@ connect_location() {
 		if [[ "$country" == "" ]]; then
 			filters=""
 		else
-			local country_id
+			local countries country_id
 			# extract country id
-			country_id=$(get_countries | jq -r --arg cc "$country" '.[] | select(.name == $cc) | .id')
+			countries=$(get_countries) || exit $?
+			country_id=$(printf %s "$countries" | jq -r --arg cc "$country" '.[] | select((.name|ascii_upcase) == ($cc|ascii_upcase)) | .id')
 			if [[ "$country_id" == "" ]]; then
 				echoexit "error: invalid country."
 			fi
@@ -703,14 +735,15 @@ connect_location() {
 			filters="filters\[country_id\]=$country_id"
 		fi
 	else
-			local city_id
-			# extract city id
-			city_id=$(get_cities "$country" | jq -r --arg ct "$city" '.[] | select(.name == $ct) | .id')
-			if [[ "$city_id" == "" ]]; then
-				echoexit "error: invalid country or city."
-			fi
-			# set country filters
-			filters="filters\[country_city_id\]=$city_id"
+		local cities city_id
+		# extract city id
+		cities=$(get_cities "$country") || exit $?
+		city_id=$(printf %s "$cities" | jq -r --arg ct "$city" '.[] | select((.name|ascii_upcase) == ($ct|ascii_upcase)) | .id')
+		if [[ "$city_id" == "" ]]; then
+			echoexit "error: invalid country or city."
+		fi
+		# set country filters
+		filters="filters\[country_city_id\]=$city_id"
 	fi
 	
 	# return filters
@@ -721,7 +754,7 @@ connect_location() {
 wg_disconnect() {
 	verify_root
 
-	local config interface server_id response server hostname
+	local config interface if_pub_key hostname server_id response server
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
@@ -731,28 +764,56 @@ wg_disconnect() {
 	if [[ "$interface" == "" ]] || [[ "$interface" == "null" ]]; then
 		echoexit "error: invalid wireguard interface."
 	fi
+
+	# check if interface is up
+	if_pub_key="$(wg show "$interface" public-key 2>/dev/null)"
+	if [[ "$if_pub_key" == "" ]]; then
+		echo -e ""
+		echo -e "You are already disconnected."
+		echo -e ""
+		exit 1
+	fi
 	
 	# extract server hostname
-	hostname="$(get_server_hostname "$interface")"
+	hostname=$(get_server_hostname "$interface") || exit $?
+
+	# ask for user confirmation
+	if [[ "$NOINTERACT" == "0" ]]; then
+		echo -e ""
+		echo -e "You will be ${RED}disconnected${ENDC} from server '${BOLD}$hostname${ENDC}'."
+		echo -e ""
+		read -p "$(echo -e "${BOLD}Do you want to continue?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
+		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+			echo -e ""
+    			echo -e "Not doing anything."
+			echo -e ""
+			exit 0
+		fi
+	fi
 
 	# print disconnecting
-	echo -e "Disconnecting from server '$hostname' ..."
+	echo -e ""
+	echo -e "${RED}Disconnecting from server${ENDC} '${BRED}$hostname${ENDC}' ${RED}...${ENDC}"
 	
 	# remove wireguard firewall rules
+	echo -e ""
 	wg_predown "$interface"
 
 	# stop wireguard interface
+	echo -e ""
 	rc-service "net.$interface" stop
 
 	# print disconnected
-	echo -e "Disconnected successfully!"
+	echo -e ""
+	echo -e "${RED}Disconnected successfully!${ENDC}"
+	echo -e ""
 }
 
 # restart
 wg_restart() {
 	verify_root
 
-	local config interface hostname
+	local config interface if_pub_key hostname
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
@@ -763,24 +824,55 @@ wg_restart() {
 		echoexit "error: invalid wireguard interface."
 	fi
 
-	# extract server hostname
-	hostname="$(get_server_hostname "$interface")"
+	# check if interface is up
+	if_pub_key="$(wg show "$interface" public-key 2>/dev/null)"
+	if [[ "$if_pub_key" == "" ]]; then
+		echo -e ""
+		echo -e "There are no connections to be restarted."
+		echo -e ""
+		exit 1
+	fi
 
+	# extract server hostname
+	hostname=$(get_server_hostname "$interface") || exit $?
+
+	# ask for user confirmation
+	if [[ "$NOINTERACT" == "0" ]]; then
+		echo -e ""
+		echo -e "Your connection to server '${BOLD}$hostname${ENDC}' will be ${GREEN}restarted${ENDC}."
+		echo -e ""
+		read -p "$(echo -e "${BOLD}Do you want to continue?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
+		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+			echo -e ""
+    			echo -e "Not doing anything."
+			echo -e ""
+			exit 0
+		fi
+	fi
+	
 	# print restarting
-	echo -e "Restarting connection to server '$hostname' ..."
+	echo -e ""
+	echo -e "${GREEN}Restarting connection to server${ENDC} '${BGREEN}$hostname${ENDC}' ${GREEN}...${ENDC}"
 
 	# restart wireguard interface
+	echo -e ""
 	rc-service "net.$interface" stop
 	rc-service "net.$interface" start
 
+	# add wireguard firewall rules
+	echo -e ""
+	wg_postup "$interface"
+
 	# print restarted
-	echo -e "Restarted successfully!"
+	echo -e ""
+	echo -e "${GREEN}Restarted successfully!${ENDC}"
+	echo -e ""
 }
 
 # error wrong number of args
 exit_args() {
 	local mod
-	mod="$(printf %s " $2 " | sed -r 's/[[:blank:]]+/ /g')"
+	mod=$(printf %s " $2 " | sed -r 's/[[:blank:]]+/ /g')
 	echo -e "Too $1 arguments."
 	echo -e "Try 'nordvpn-rc$mod--help' to see available options."
 	exit 1
@@ -790,6 +882,12 @@ exit_args() {
 [ $# -lt 1 ] && exit_args "few" ""
 m_opt=$1
 shift
+if [[ "$m_opt" == "-y" ]]; then
+	NOINTERACT="1"
+	[ $# -lt 1 ] && exit_args "few" ""
+	m_opt=$1
+	shift
+fi
 case "$m_opt" in
 	"-h" | "--help")
 		[ $# -gt 0 ] && exit_args "many" ""
@@ -805,7 +903,7 @@ case "$m_opt" in
 		echo -e "  (d)isconnect  disconnect from server"
 		echo -e "  (r)estart     restart current connection"
 		echo -e ""
-		echo -e "To see options run 'nordvpn-rc <action> --help'"
+		echo -e "To see options run '${BOLD}nordvpn-rc <action> --help${ENDC}'"
 		echo -e ""
 		exit 0
 		;;
@@ -926,14 +1024,16 @@ case "$m_opt" in
 				[ $# -lt 1 ] && country="" || country=$1 && shift 2>/dev/null
 				[ $# -lt 1 ] && city="" || city=$1 && shift 2>/dev/null
 				[ $# -gt 0 ] && exit_args "many" "connect"
-				connect_to_recommended "$(connect_location "$country" "$city")"
+				filters=$(connect_location "$country" "$city") || exit $?
+				connect_to_recommended "$filters"
 				exit 0
 				;;
 			"o" | "other")
 				[ $# -lt 1 ] && country="" || country=$1 && shift 2>/dev/null
 				[ $# -lt 1 ] && city="" || city=$1 && shift 2>/dev/null
 				[ $# -gt 0 ] && exit_args "many" "connect"
-				connect_to_other "$(connect_location "$country" "$city")"
+				filters=$(connect_location "$country" "$city") || exit $?
+				connect_to_other "$filters"
 				exit 0
 				;;
 			*)

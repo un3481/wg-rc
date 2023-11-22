@@ -15,14 +15,14 @@ echoexit() {
 }
 
 # Checking dependencies:
-whereis curl > /dev/null || echoexit "'curl' not found."
-whereis jq > /dev/null || echoexit "'jq' not found."
-whereis wg > /dev/null || echoexit "'wg' not found."
+whereis curl > /dev/null || echoexit "'curl' command not found."
+whereis jq > /dev/null || echoexit "'jq' command not found."
+whereis wg > /dev/null || echoexit "'wg' command not found."
+whereis ip > /dev/null || echoexit "'ip' command not found."
+whereis nft > /dev/null || echoexit "'nft' command not found."
 whereis rc-service > /dev/null || echoexit "'rc-service' not found."
 
 # constants
-
-TMPDIR="/tmp"
 NOINTERACT="0"
 
 # format colors
@@ -36,6 +36,8 @@ BOLD="\e[1;97m"
 ENDC="\e[0m"
 
 # config files
+INIT_DIR="/etc/init.d"
+CONF_DIR="/etc/conf.d"
 WIREGUARD_DIR="/etc/wireguard"
 NORDVPN_DIR="$WIREGUARD_DIR/nordvpn"
 NORDVPN_CONFIG="$NORDVPN_DIR/config.json"
@@ -90,6 +92,21 @@ verify_root() {
 	fi
 }
 
+# verify api response
+verify_response() {
+	local response errors
+	response=$1
+
+	# check for errors in response
+	if [[ "$response" == "" ]]; then
+		echoexit "api_error: API call returned nothing."
+	fi	
+	errors=$(printf %s "$response" | jq '.errors' 2>/dev/null)
+	if [[ "$errors" != "" ]] && [[ "$errors" != "null" ]]; then
+		echoexit "api_error: API replied with errors: '$errors'."
+	fi
+}
+
 # verify if token is valid on remote
 verify_token() {
 	local token response errors valid
@@ -111,25 +128,14 @@ verify_token() {
 
 # print error message for invalid token and exit
 exit_invalid_token() {
-	echo -e "You have not set a valid nordvpn access token."
+	echo -e ""
+	echo -e "${RED}You have not set a valid${ENDC} ${BRED}Access Token${ENDC}${RED}.${ENDC}"
+	echo -e ""
 	echo -e "Please follow the instructions to obtain a new token: https://support.nordvpn.com/Connectivity/Linux/1905092252/How-to-log-in-to-NordVPN-on-Linux-with-a-token.htm"
+	echo -e ""
 	echo -e "Once you have copied your token, you can use it by running '${BOLD}nordvpn-rc set token <value>${ENDC}'."
+	echo -e ""
 	exit 1
-}
-
-# verify api response
-verify_response() {
-	local response errors
-	response=$1
-
-	# check for errors in response
-	if [[ "$response" == "" ]]; then
-		echoexit "api_error: API call returned nothing."
-	fi	
-	errors=$(printf %s "$response" | jq '.errors' 2>/dev/null)
-	if [[ "$errors" != "" ]] && [[ "$errors" != "null" ]]; then
-		echoexit "api_error: API replied with errors: '$errors'."
-	fi
 }
 
 # get wireguard private key from nordvpn and put it in the config file
@@ -137,15 +143,12 @@ update_private_key() {
 	verify_root
 
 	local config token response private_key
-	
+
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
 
 	# get nordvpn token from config file
 	token=$(printf %s "$config" | jq -r '.token')
-
-	# verify token
-	verify_token "$token"
 
 	# request api for credentials
 	response=$(curl -s "$NORDVPN_API_CREDENTIALS" -u "token:$token")
@@ -164,7 +167,6 @@ update_private_key() {
 	mkdir -p "$NORDVPN_DIR"
 	echo "$config" > "$NORDVPN_CONFIG"
 	chmod 600 "$NORDVPN_CONFIG"
-	
 }
 
 # set nordvpn access token in the config file
@@ -176,11 +178,20 @@ set_token() {
 
 	# check the string provided by user
 	if [[ "$token" == "" ]]; then
-		echoexit "error: Attempting to set invalid access token."
+		echo -e ""
+		echo -e "Attempting to set ${RED}invalid${ENDC} access token."
+		echo -e ""
+		exit 1
 	fi
+
+	echo -e ""
+	echo -e "Verifying ${BOLD}Access Token${ENDC} ..."
 	
 	# verify token
 	verify_token "$token"
+
+	echo -e ""
+	echo -e "${BGREEN}Access Token${ENDC} ${GREEN}Valid!${ENDC}"
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
@@ -193,31 +204,91 @@ set_token() {
 	echo "$config" > "$NORDVPN_CONFIG"
 	chmod 600 "$NORDVPN_CONFIG"
 
+	echo -e ""
+	echo -e "${BGREEN}Access Token${ENDC} ${GREEN}updated successfully!${ENDC}"
+
+	echo -e ""
+	echo -e "Updating ${BOLD}WireGuard Private Key${ENDC} ..."
+
 	# update credentials
 	update_private_key
+
+	echo -e ""
+	echo -e "${BGREEN}WireGuard Private Key${ENDC} ${GREEN}updated successfully!${ENDC}"
+	echo -e ""
 }
 
 # set wireguard interface in the config file
 set_interface() {
 	verify_root
 	
-	local config interface wg_if_file
+	local config interface
 	interface=$1
 
 	# check the string provided by user
 	if [[ "$interface" == "" ]]; then
-		echoexit "error: Attempting to set invalid interface."
+		echo -e ""
+		echo -e "Attempting to set ${RED}invalid${ENDC} interface."
+		echo -e ""
+		exit 1
 	fi
 
-	# check for existing config file
+	# file paths
+	local net_lo_file net_if_file net_conf_file wg_if_file
+
+	net_lo_file="$INIT_DIR/net.lo"
+	net_if_file="$INIT_DIR/net.$interface"
+	net_conf_file="$CONF_DIR/net"
 	wg_if_file="$WIREGUARD_DIR/$interface.conf"
+
+	echo -e ""
+	echo -e "Checking init script at '${BOLD}$net_if_file${ENDC}' ..."
+
+	# check for existing config file
+	if ! test -f "$net_if_file" || [[ "$(realpath $net_if_file)" != "$net_lo_file" ]]; then
+		echo -e ""
+		echo -e "${RED}Init script at${ENDC} '${BRED}$net_if_file${ENDC}' ${RED}is not valid.${ENDC}"
+		echo -e ""
+		exit 1
+	fi
+
+	echo -e ""
+	echo -e "${GREEN}Init script at${ENDC} '${BGREEN}$net_if_file${ENDC}' ${GREEN}is valid.${ENDC}"
+
+	echo -e ""
+	echo -e "Checking network configuration at '${BOLD}$net_conf_file${ENDC}' ..."
+
+	# check for interface config
+	local net_conf_wg_if net_conf_config_if net_conf wg_if_line config_if_line config_if
+
+	net_conf_wg_if="wireguard_$interface=\"$wg_if_file\""
+	net_conf_config_if="config_$interface=\""
+
+	# read config file
+	net_conf=$(cat "$net_conf_file" 2>/dev/null)
+	wg_if_line=$(printf %b "$net_conf" | grep "^$net_conf_wg_if\$" 2>/dev/null)
+	config_if_line=$(printf %b "$net_conf" | grep "^$net_conf_config_if" 2>/dev/null)
+	config_if=$(printf %b "$config_if_line" | sed -r "s/$net_conf_config_if//g" | sed -r "s/\"//g")
+
+	# check for line in file	
+	if [[ "$wg_if_line" == "" ]] || [[ "$config_if_line" == "" ]]; then
+		echo -e ""
+		echo -e "${RED}Network configuration missing at${ENDC} '${BRED}$net_conf_file${ENDC}'${RED}.${ENDC}"
+		echo -e ""
+		exit 1
+	fi
+
+	echo -e ""
+	echo -e "${GREEN}Interface${ENDC} '${BGREEN}$interface${ENDC}' ${GREEN}configured as${ENDC} '${BGREEN}$config_if${ENDC}'${GREEN}.${ENDC}"
+	
+	# check for existing config file
 	if [[ "$NOINTERACT" == "0" ]] && test -f "$wg_if_file"; then
 		echo -e ""
-		echo -e "File '$wg_if_file' already exists."
+		echo -e "WireGuard config file '${BOLD}$wg_if_file${ENDC}' already exists."
 		echo -e ""
-		read -p "${BOLD}Do you want to override it?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] " -r
-		echo -e ""
+		read -p "$(echo -e "${BOLD}Do you want to override it?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
 		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+			echo -e ""
     			echo -e "Not doing anything."
 			echo -e ""
 			exit 0
@@ -234,8 +305,9 @@ set_interface() {
 	mkdir -p "$NORDVPN_DIR"
 	echo "$config" > "$NORDVPN_CONFIG"
 	chmod 600 "$NORDVPN_CONFIG"
-
-	echo -e "Interface '$interface' configured successfully!"
+	
+	echo -e ""
+	echo -e "${GREEN}Interface${ENDC} '${BGREEN}$interface${ENDC}' ${GREEN}configured.${ENDC}"
 	echo -e ""
 }
 
@@ -248,7 +320,7 @@ get_countries() {
 	verify_response "$response"
 
 	# extract country name and id
-	countries=$(printf %s "$response" | jq 'map({ id: .id, name: .name })')
+	countries=$(printf %s "$response" | jq 'map({ id: .id, conde: .code, name: .name })')
 
 	# return response
 	printf %s "$countries"
@@ -311,17 +383,17 @@ get_server_id() {
 		echoexit "No interface config file found."
 	fi
 
-	# change interface symlink
-	wg_if="$(cat "$wg_if_file" 2>/dev/null)"
+	# read config file
+	wg_if=$(cat "$wg_if_file" 2>/dev/null)
 
-	# check for comment in file
-	line="$(printf %b "$wg_if" | grep "^# SERVER_ID = " 2>/dev/null)"
+	# check for line in file
+	line=$(printf %b "$wg_if" | grep "^# SERVER_ID = " 2>/dev/null)
 	if [[ "$line" == "" ]]; then
 		echoexit "error: invalid wireguard config '$wg_if_file'."
 	fi
 
 	# extract server id
-	server_id="$(printf %s "$line" | cut -d "=" -f 2 | sed -r "s/\ //g")"
+	server_id=$(printf %s "$line" | cut -d "=" -f 2 | sed -r "s/\ //g")
 	
 	# return server id
 	printf %s "$server_id"
@@ -342,17 +414,17 @@ get_server_hostname() {
 		echoexit "error: no interface config file found."
 	fi
 
-	# change interface symlink
+	# read config file
 	wg_if="$(cat "$wg_if_file" 2>/dev/null)"
 
-	# check for entry in file
+	# check for line in file
 	line="$(printf %b "$wg_if" | grep "^Endpoint = " 2>/dev/null)"
 	if [[ "$line" == "" ]]; then
 		echoexit "error: invalid wireguard config '$wg_if_file'."
 	fi
 
 	# extract server hostname
-	hostname="$(printf %s "$line" | cut -d "=" -f 2 | sed -r "s/\ //g" | cut -d ":" -f 1)"
+	hostname=$(printf %s "$line" | cut -d "=" -f 2 | sed -r "s/\ //g" | cut -d ":" -f 1)
 	
 	# return server hostname
 	printf %s "$hostname"
@@ -907,10 +979,15 @@ case "$m_opt" in
 		echo -e ""
 		exit 0
 		;;
-	"g" | "get")
-		[ $# -lt 1 ] && exit_args "few" "get"
-		g_opt=$1
-		shift
+	"g" | "gs" | "get")
+		case "$m_opt" in
+			"gs") g_opt="s" ;;
+			*)
+				[ $# -lt 1 ] && exit_args "few" "get"
+				g_opt=$1
+				shift
+				;;
+		esac	
 		case "$g_opt" in
 			"-h" | "--help")
 				[ $# -gt 0 ] && exit_args "many" "get"
@@ -940,7 +1017,7 @@ case "$m_opt" in
 				get_cities "$country" | jq -r '.[].name'
 				exit 0
 				;;
-			"status")
+			"s" | "status")
 				[ $# -gt 0 ] && exit_args "many" "get"
 				get_status
 				exit 0
@@ -956,7 +1033,7 @@ case "$m_opt" in
 		[ $# -lt 1 ] && exit_args "few" "set"
 		s_opt=$1
 		shift
-		case "$s_option" in
+		case "$s_opt" in
 			"-h" | "--help")
 				[ $# -gt 0 ] && exit_args "many" "set"
 				echo -e ""

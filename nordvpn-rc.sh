@@ -179,7 +179,7 @@ set_token() {
 	# check the string provided by user
 	if [[ "$token" == "" ]]; then
 		echo -e ""
-		echo -e "Attempting to set ${RED}invalid${ENDC} access token."
+		echo -e "Attempting to set ${RED}invalid${ENDC} ${BOLD}Access Token${ENDC}."
 		echo -e ""
 		exit 1
 	fi
@@ -191,7 +191,24 @@ set_token() {
 	verify_token "$token"
 
 	echo -e ""
-	echo -e "${BGREEN}Access Token${ENDC} ${GREEN}Valid!${ENDC}"
+	echo -e "${BGREEN}Access Token${ENDC} ${GREEN}is valid!${ENDC}"
+
+	# ask for user confirmation
+	if [[ "$NOINTERACT" == "0" ]]; then
+		echo -e ""
+		echo -e "Your ${BOLD}Access Token${ENDC} will be updated. Any previous credentials will be lost."
+		echo -e ""
+		read -p "$(echo -e "${BOLD}Do you want to continue?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
+		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+			echo -e ""
+    			echo -e "Not doing anything."
+			echo -e ""
+			exit 0
+		fi
+	fi
+
+	echo -e ""
+	echo -e "Updating ${BOLD}Access Token${ENDC} ..."
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")

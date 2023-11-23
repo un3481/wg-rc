@@ -65,7 +65,7 @@ nordvpn-rc set interface wg0
 
 ## Authentication
 
-This client requires a valid token to connect to NordVPN.
+This client requires the use of a valid NordVPN Access Token to connect to the servers.
 
 To obtain your token, you can follow the [official instructions](https://support.nordvpn.com/Connectivity/Linux/1905092252/How-to-log-in-to-NordVPN-on-Linux-with-a-token.htm) available on their blog.
 
@@ -78,4 +78,26 @@ nordvpn-rc set token "your-token-goes-here"
 The above command will verify the validity of your token before setting it.
 
 It will also fetch and store a WireGuard private-key, which is used to connect to the servers.
+
+## Connecting
+
+With this client, one can easily connect to the server recommended by NordVPN in a given country or city.
+
+For example, for a server in poland, run the following command:
+
+```
+nordvpn-rc cr france
+```
+
+For a server in warsaw:
+
+```
+nordvpn-rc cr poland warsaw
+```
+
+For other connect options, run:
+
+```
+nordvpn-rc connect --help
+```
 

@@ -93,6 +93,8 @@ For example, for interface "wg0", run the following command:
 nordvpn-rc set interface wg0
 ```
 
+The choosen interface will now be used to establish WireGuard connections to NordVPN's servers.
+
 ## Authentication
 
 This client requires the use of a valid NordVPN Access Token to connect to the servers.
@@ -111,7 +113,7 @@ It will also fetch and store a WireGuard private-key, which is used to connect t
 
 ## Connecting
 
-With this client, one can easily connect to the server recommended by NordVPN in a given country or city.
+With this client, one can easily connect to the server recommended by NordVPN in any given country or city.
 
 For example, for the recommended server in france, run the following command:
 

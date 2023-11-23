@@ -62,6 +62,8 @@ The first entry is "wireguard_\<interface\>". This is the path to the WireGuard 
 
 For this client to work, the path to the config file should be "/etc/wireguard/\<interface\>.conf"
 
+OBS.: You do not need to create the actual config file, the client will do that programmatically later on.
+
 The second entry is "config_\<interface\>". This is the local ip address of your interface.
 
 You can choose any ip address that doesn't conflict with your local network.
@@ -75,9 +77,9 @@ config_wg0="10.5.0.2/32"
 
 After the above is completed successfully, you should be able to use your interface.
 
-OBS.: Do not add any extra configuration besides these two. Adding extra configuration can make your VPN uneffective or unusable.
+OBS.: Do not add any extra configuration besides these two unless you really know what you are doing. Adding extra configuration can make this client uneffective or unusable.
 
-Now you need to add your configured interface to the client.
+Now you just need to add your configured interface to the client.
 
 For example, for interface "wg0", run the following command:
 

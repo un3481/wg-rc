@@ -2,6 +2,8 @@
 
 NordVPN client using WireGuard and Netifrc
 
+This client is made entirely with shell script and it's designed to be simple, small and easily auditable. 
+
 ## Install
 
 ### Dependencies
@@ -9,7 +11,7 @@ NordVPN client using WireGuard and Netifrc
 You need to have the following packages installed in your system for this client to work:
 
 ```
-openrc netifrc dchpcd nftables iproute2 wireguard-tools curl jq
+openrc netifrc dhcpcd nftables iproute2 wireguard-tools curl jq
 ```
 
 You can install these with portage by running the following command:

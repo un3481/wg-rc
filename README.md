@@ -83,19 +83,19 @@ It will also fetch and store a WireGuard private-key, which is used to connect t
 
 With this client, one can easily connect to the server recommended by NordVPN in a given country or city.
 
-For example, for a server in poland, run the following command:
+For example, for the recommended server in france, run the following command:
 
 ```
 nordvpn-rc cr france
 ```
 
-For a server in warsaw:
+For the recommended server in warsaw:
 
 ```
 nordvpn-rc cr poland warsaw
 ```
 
-For other connect options, run:
+To see other connection options, run:
 
 ```
 nordvpn-rc connect --help

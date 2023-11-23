@@ -986,6 +986,7 @@ case "$m_opt" in
 		echo -e ""
 		echo -e "actions:"
 		echo -e "  -h, --help    display this help message"
+		echo -e "  -y            run command in non-interactive mode"
 		echo -e "  (g)et         get info from VPN provider"
 		echo -e "  (s)et         set config"
 		echo -e "  (c)onnect     connect to server"
@@ -1017,7 +1018,7 @@ case "$m_opt" in
 				echo -e "  -h, --help  display this help message"
 				echo -e "  countries   get country list from VPN provider"
 				echo -e "  cities      get city list from VPN provider"
-				echo -e "  status      get current VPN status"
+				echo -e "  (s)tatus      get current VPN status"
 				echo -e ""
 				exit 0
 				;;
@@ -1143,12 +1144,12 @@ case "$m_opt" in
 		esac
 		;;
 	"d" | "disconnect")
-		[ $# -gt 0 ] && exit_args "many" "disconnect"
+		[ $# -gt 0 ] && exit_args "many" ""
 		wg_disconnect
 		exit 0
 		;;
 	"r" | "restart")
-		[ $# -gt 0 ] && exit_args "many" "restart"
+		[ $# -gt 0 ] && exit_args "many" ""
 		wg_restart
 		exit 0
 		;;

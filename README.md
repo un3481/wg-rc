@@ -4,6 +4,24 @@ NordVPN client using WireGuard and Netifrc
 
 ## Install
 
+### Dependencies
+
+You need to have the following packages installed in your system for this client to work:
+
+```
+openrc netifrc dchpcd nftables iproute2 wireguard-tools curl jq
+```
+
+You can install these with portage by running the following command:
+
+```
+emerge -av sys-apps/openrc net-misc/netifrc net-misc/dhcpcd net-firewall/nftables sys-apps/iproute2 net-vpn/wireguard-tools net-misc/curl app-misc/jq
+```
+
+You also need to make sure your kernel has the WireGuard feature enabled, as well as the firewall feature for nftables.
+
+### Client
+
 You can copy the script into any directory that's in your PATH variable, like the following:
 
 ```
@@ -55,7 +73,9 @@ config_wg0="10.5.0.2/32"
 
 After the above is completed successfully, you should be able to use your interface.
 
-You just need to add your interface to the client.
+OBS.: Do not add any extra configuration besides these two. Adding extra configuration can make your VPN uneffective or unusable.
+
+Now you need to add your configured interface to the client.
 
 For example, for interface "wg0", run the following command:
 

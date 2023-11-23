@@ -32,7 +32,7 @@ You also need to configure the newly created interface to use wireguard.
 In order to do that, you need to add some entries to "/etc/conf.d/net".
 
 The first entry is "wireguard_\<interface\>". This is the path to the wireguard config file.
-For this client to work, the path to the config file should be "/etc/wireguard/<interface>.conf"
+For this client to work, the path to the config file should be "/etc/wireguard/\<interface\>.conf"
 
 The second entry is "config_\<interface\>". This is the local ip address of your interface.
 You can choose any ip address that doesn't conflict with your local network.

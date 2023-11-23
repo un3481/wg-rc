@@ -44,6 +44,8 @@ nordvpn-rc --help
 
 ## Creating Interface
 
+### Init Script
+
 You need to create a WireGuard interface before connecting to any server with this client.
 
 In Netifrc, this requires creating an init script for the interface in folder "/etc/init.d".
@@ -53,6 +55,8 @@ For example, for interface "wg0", run the following command:
 ```
 ln -s /etc/init.d/net.lo /etc/init.d/net.wg0
 ```
+
+### Configuration
 
 You also need to configure the newly created interface to use WireGuard.
 
@@ -78,6 +82,8 @@ config_wg0="10.5.0.2/32"
 After the above is completed successfully, you should be able to use your interface.
 
 OBS.: Do not add any extra configuration besides these two unless you really know what you are doing. Adding extra configuration can make this client uneffective or unusable.
+
+### Using the Interface
 
 Now you just need to add your configured interface to the client.
 

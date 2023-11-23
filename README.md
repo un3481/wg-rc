@@ -31,7 +31,7 @@ In Netifrc, this requires creating an init script for the interface in folder "/
 For example, for interface "wg0", run the following command:
 
 ```
-ln -s /etc/init.d/net.wg0 /etc/init.d/net.lo
+ln -s /etc/init.d/net.lo /etc/init.d/net.wg0
 ```
 
 You also need to configure the newly created interface to use WireGuard.

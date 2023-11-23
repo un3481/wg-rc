@@ -1,8 +1,26 @@
 # nordvpn-rc
 
-NordVPN client using WireGuard and Netifrc
+NordVPN client using WireGuard and Netifrc.
 
-This client is made entirely with shell script and it's designed to be simple, small and easily auditable. 
+This project is made entirely with shell script and it's designed to be simple, small, easily maintainable and auditable. 
+
+### Behaviour
+
+The client uses a WireGuard interface to connect to NordVPN's NordLynx (WireGuard) servers.
+
+Therefore, the client requires a valid WireGuard private-key provided by NordVPN.
+
+For the client to obtain a private-key, the user must provide valid NordVPN credentials (Access Token).
+
+Once the WireGuard connection is established, the client will route all network traffic through the interface.
+
+In order to do this, the client will change firewall rules in nftables as well as edit "/etc/dispatch.conf" file.
+
+Once the firewall rules are set, all the network traffic is routed through WireGuard.
+
+The user can restart the connection or connect to different servers without loosing protection at any given point.
+
+The firewall rules will only be revoked once the user explicitly disconnects from the client.
 
 ## Install
 

@@ -22,7 +22,14 @@ whereis ip > /dev/null || echoexit "'ip' command not found."
 whereis nft > /dev/null || echoexit "'nft' command not found."
 whereis rc-service > /dev/null || echoexit "'rc-service' not found."
 
-# constants
+#
+# Constants
+#
+
+# tmpfs
+TMPDIR="/tmp"
+
+# no request user confirmation
 NOINTERACT="0"
 
 # format colors
@@ -476,7 +483,7 @@ peer_online() {
 get_status() {
 	verify_root
 
-	local config interface server_id response server if_pub_key if_stts peer_stts conn_stts
+	local config interface server_id response server if_pub_key if_stts peer_stts routing_stts conn_stts
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
@@ -511,8 +518,16 @@ get_status() {
 		peer_stts=$(peer_online "$interface" "$server") || exit $?
 	fi
 
+	# check if routing is set
+	routing_stts=$(routing_status "$interface") || exit $?
+	if [[ "$routing_stts" == "yes:yes" ]]; then
+		routing_stts="on"
+	else
+		routing_stts="off"
+	fi
+
 	# check if interface is connected to given server
-	if [[ "$if_stts" == "up" ]] && [[ "$peer_stts" == "online" ]]; then
+	if [[ "$if_stts" == "up" ]] && [[ "$peer_stts" == "online" ]] && [[ "$routing_stts" == "on" ]]; then
 		conn_stts="connected"
 	else
 		conn_stts="disconnected"
@@ -533,6 +548,7 @@ get_status() {
 	echo -e "${stts_color}status${ENDC}: ${conn_color}$conn_stts${ENDC}"
 	echo -e "  ${BOLD}interface${ENDC}: $if_stts"
 	echo -e "  ${BOLD}peer${ENDC}: $peer_stts"
+	echo -e "  ${BOLD}routing${ENDC}: $routing_stts"
 
 	# print info if interface is up
 	if [[ "$if_stts" == "up" ]]; then
@@ -545,89 +561,217 @@ get_status() {
 	fi
 }
 
-# wireguard postup script
-wg_postup() {
+# check for routing status
+routing_status() {
 	verify_root
 
 	local interface
 	interface=$1
 
-	echo -e "Running postup ..."
+	local r_rule f_rule routing firewall r_status
+	r_rule="not from all fwmark 0x51a77 lookup 2468"
+	f_rule="oifname != \"$interface\" meta mark != 0x00051a77 fib daddr type != local counter packets 0 bytes 0 reject"
 
-	# After the interface is up, we add routing and firewall rules,
-	# which prevent packets from going through the normal routes, which are
-	# for "plaintext" packets.
-	# routing rules taken from: https://www.wireguard.com/netns/
-	# firewall rules taken from: man wg-quick
-	#
-	# If the connection to the VPN goes down, the firewall rule makes sure
-	# no other connections can be open, until you remove the interface
-	# using: rc-service net.wg0 stop
-	#
-	# For the nftables firewall rule to work, make sure you set:
-	# SAVE_ON_STOP="no"
-	# in: /etc/conf.d/nftables
+	# get status
+	routing=$(ip rule | grep -m 1 "$r_rule")
+	firewall=$(nft list chain ip filter output 2>/dev/null | grep -m 1 "$f_rule") 
 
-	# set a firewall mark for all wireguard packets
-	wg set "$interface" fwmark 334455 || exit 1
-	
-	# route all packets to the interface in table 2468
-	ip route add default dev "$interface" table 2468 || exit 1
-	
-	# if packet doesn't have the wireguard firewall mark,
-	# send it to table 2468
-	ip rule add not fwmark 334455 table 2468 || exit 1
-		
-	# if packet isn't going out the interface, doesn't have
-	# the wireguard firewall mark and isn't broadcast or multicast
-	# reject it (don't drop it like there's no connection)
-	nft add table ip filter
-	nft add chain ip filter output
-	nft insert rule ip filter output oifname!="wg0" mark!=334455 fib daddr type!=local counter reject || exit 1
-		
-	# Make sure only DNS server is the one from your provider or
-	# a custom one fitting your needs!
-	# If there is one, otherwise you can remove this line.
-	echo "nameserver 103.86.96.100" > /etc/resolv.conf || exit 1
-	echo "nameserver 103.86.99.100" >> /etc/resolv.conf || exit 1
+	# check status
+	if [[ "$routing" == "" ]]; then
+		r_status="no:"
+	else
+		r_status="yes:"
+	fi
+	if [[ "$firewall" == "" ]]; then
+		r_status+="no"
+	else
+		r_status+="yes"
+	fi
+
+	# print both statuses
+	printf %s "$r_status"
 }
 
-# wireguard predown script
-wg_predown() {
+#
+# wireguard postup script
+#
+# After the interface is up, we add routing and firewall rules,
+# which prevent packets from going through the normal routes, which are
+# for "plaintext" packets.
+#
+# If the connection to the VPN goes down, the firewall rule makes sure
+# no other connections can be open, until you explicitly disconnect
+# the client by running 'nordvpn-rc disconnect'
+#
+set_routing() {
 	verify_root
 
-	local interface
+	local interface nft_atom nft_atom_file nft_handle
 	interface=$1
 
-	echo -e "Running predown ..."
-
-	# When bringing down the interface using rc-service, make sure that all
-	# rules specific to isolating the wireguard connections are gone, so
-	# that normal connections can work again.
-	# Change the DNS values for your setup!
+	echo -e "Adding routing and firewall rules ..."
 	
-	# Bringing back default nftables rules.
-	rc-service nftables reload || exit 1
-
-	# Removing wireguard specific routing rules.
-	ip route del default dev "$interface" table 2468 || exit 1
-	ip rule del not fwmark 334455 table 2468 || exit 1
-
-	# Bringing back your own DNS settings, in case they were
-	# changed in postup()
+	#
+	# create firewall blocking rule.
+	#
+	# if packet isn't going out the wireguard interface, doesn't have
+	# the wireguard firewall mark and isn't broadcast or multicast
+	# reject it (don't drop it like there's no connection).
+	#
+	# firewall rules taken from: man wg-quick
+	#
 	
-	echo "nameserver 1.2.3.4" > /etc/resolv.conf || exit 1
-	echo "nameserver 123.12.21.1" >> /etc/resolv.conf || exit 1
+	# create atomic operation
+	nft_atom="#!/sbin/nft -f"
+	nft_atom+="\n"
+	nft_atom+="\nadd table ip filter"
+	nft_atom+="\nadd chain ip filter output"
+	nft_atom+="\n"
 
-	rc-service dhcpcd stop
-	rc-service dhcpcd start
+	local f_rule
+	f_rule="oifname != \"$interface\" meta mark != 0x00051a77 fib daddr type != local counter packets 0 bytes 0 reject"
+
+	# check if old rule exists
+	nft_handle=$(nft -a list chain ip filter output 2>/dev/null | grep -m 1 "$f_rule")
+	if [[ "$nft_handle" != "" ]]; then
+		# get rule handle
+		nft_handle=$(echo "$nft_handle" | cut -d "#" -f 2 | grep "handle" | sed -r "s/handle/ /g")
+	
+		# create atomic operation	
+		nft_atom+="\ndelete rule filter output handle $nft_handle"
+		nft_atom+="\n"
+	fi
+	
+	# create rule
+	nft_atom+="\ninsert rule ip filter output oifname!=\"$interface\" mark!=334455 fib daddr type!=local counter reject"
+	nft_atom+="\n"
+
+	# write operation to file
+	nft_atom_file="$TMPDIR/nordvpn_nftables.set"
+	echo -e "$nft_atom" > "$nft_atom_file"
+
+	# run atomic operation
+	nft -f "$nft_atom_file" || return 1
+
+	#
+	# create routing rules.
+	#
+	# add wireguard interface to table 2468 and then
+	# route all packets through that table.
+	#
+	# routing rules taken from: https://www.wireguard.com/netns/
+	#
+	
+	# removing old routing rules, if they exist, to prevent errors.
+	ip rule del not fwmark 334455 table 2468 2>/dev/null
+	ip route del default dev "$interface" table 2468 2>/dev/null
+	
+	# set a firewall mark for all packets going through wireguard interface.
+	wg set "$interface" fwmark 334455 || return 1
+
+	# add wireguard interface to table 2468
+	ip route add default dev "$interface" table 2468 || return 1
+	
+	# if packet doesn't have the wireguard firewall mark, send it to table 2468.
+	ip rule add not fwmark 334455 table 2468 || return 1
+
+	#
+	# change DNS servers.
+	#
+	# Add DNS servers from NordVPN to resolv.conf 
+	# to enable name resolution in the VPN connection.
+	#
+	# DNS taken from: https://support.nordvpn.com/General-info/1047409702/What-are-your-DNS-server-addresses.htm
+	#
+	
+	# prevent dhcpcd from writing to '/etc/resolv.conf'.
+	echo "nohook resolv.conf" >> "/etc/dhcpcd.conf"
+	echo -e ""
+
+	# restart dhcpcd to reload the config.
+	# it should not edit /etc/resolv.conf anymore.
+	rc-service dhcpcd restart
+
+	# DNS Servers from NordVPN:
+	echo "# File generated by nordvpn-rc script." > /etc/resolv.conf || return 1
+	echo "# Do not edit this file manually." >> /etc/resolv.conf || return 1
+	echo "nameserver 103.86.96.100" >> /etc/resolv.conf || return 1
+	echo "nameserver 103.86.99.100" >> /etc/resolv.conf || return 1
+}
+
+#
+# wireguard predown script
+#
+# When disconnecting the client, make sure that all rules
+# specific to isolating the wireguard connections are gone, so
+# that normal connections can work again.
+# Change the DNS values for your setup!
+#
+unset_routing() {
+	verify_root
+
+	local interface routing_stts nft_atom nft_atom_file nft_handle
+	interface=$1
+
+	echo -e "Revoking routing and firewall rules ..."	
+
+	# check routing status
+	routing_stts=$(routing_status "$interface") || exit $?
+	if [[ "$routing" == "no:no" ]]; then
+		return 0
+	fi
+	
+	#
+	# remove wireguard routing rules.
+	#
+	# routing rules taken from: https://www.wireguard.com/netns/
+	#
+	
+	# delete routing rule.
+	ip rule del not fwmark 334455 table 2468 || return 1
+	
+	# remove wireguard interface from table 2468.
+	ip route del default dev "$interface" table 2468 || return 1
+
+	#
+	# bring back your own DNS settings.
+	#
+
+	# enable dhcpcd to write to '/etc/resolv.conf' again.
+	local dhcpcd_conf
+	dhcpcd_conf=$(grep -v "nohook resolv.conf" "/etc/dhcpcd.conf")
+	echo -e "$dhcpcd_conf" > "/etc/dhcpcd.conf"
+	echo -e "" > "/etc/resolv.conf"
+	
+	# restart dhcpcd to reset DNS settings
+	echo -e ""
+	rc-service dhcpcd restart
+
+	#
+	# remove firewall blocking rule.
+	#
+	# firewall rules taken from: man wg-quick
+	#
+
+	local f_rule
+	f_rule="oifname != \"$interface\" meta mark != 0x00051a77 fib daddr type != local counter packets 0 bytes 0 reject"
+	
+	# check for rule in nftables
+	nft_handle=$(nft -a list chain ip filter output 2>/dev/null | grep -m 1 "$f_rule")
+	if [[ "$nft_handle" != "" ]]; then
+		# get rule handle
+		nft_handle=$(echo "$nft_handle" | cut -d "#" -f 2 | grep "handle" | sed -r "s/handle/ /g")
+	
+		# delete blocking rule
+		nft delete rule ip filter output handle "$nft_handle" || return 1
+	fi
 }
 
 # connect to given wireguard server
 connect() {
 	verify_root
 
-	local server hostname server_id public_key config private_key wg_config wg_config_file interface wg_if_file
+	local server hostname server_id public_key config private_key wg_config wg_config_file interface wg_if_file set_routing_stts routing_stts
 	server=$1
 
 	# extract hostname
@@ -720,7 +864,18 @@ connect() {
 
 	# add wireguard firewall rules
 	echo -e ""
-	wg_postup "$interface"
+	set_routing "$interface" || set_routing_stts=$?
+
+	# check routing status
+	routing_stts=$(routing_status "$interface") || exit $?
+	if [[ "$routing_stts" != "yes:yes" ]] || [[ "$set_routing_stts" != "" ]]; then
+		echo -e ""
+		echo -e "${RED}Error setting routing rules.${ENDC}"
+		echo -e ""
+		echo -e "You can verify the status of your routing with '${BOLD}ip rule${ENDC}' and firewall with '${BOLD}nft list ruleset${ENDC}'."
+		echo -e ""
+		exit 1
+	fi
 	
 	# print connected
 	echo -e ""
@@ -843,7 +998,7 @@ connect_location() {
 wg_disconnect() {
 	verify_root
 
-	local config interface if_pub_key hostname server_id response server
+	local config interface if_pub_key hostname server_id response server unset_routing_stts routing_stts
 
 	# read config file
 	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
@@ -886,7 +1041,18 @@ wg_disconnect() {
 	
 	# remove wireguard firewall rules
 	echo -e ""
-	wg_predown "$interface"
+	unset_routing "$interface" || unset_routing_stts=$?
+
+	# check routing status
+	routing_stts=$(routing_status "$interface") || exit $?
+	if [[ "$routing_stts" != "no:no" ]] || [[ "$unset_routing_stts" != "" ]]; then
+		echo -e ""
+		echo -e "${RED}Error revoking routing rules.${ENDC}"
+		echo -e ""
+		echo -e "You can verify the status of your routing with '${BOLD}ip rule${ENDC}' and firewall with '${BOLD}nft list ruleset${ENDC}'."
+		echo -e ""
+		exit 1
+	fi
 
 	# stop wireguard interface
 	echo -e ""

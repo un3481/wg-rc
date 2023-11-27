@@ -1123,7 +1123,7 @@ wg_restart() {
 
 	# add wireguard firewall rules
 	echo -e ""
-	wg_postup "$interface"
+	set_routing "$interface"
 
 	# print restarted
 	echo -e ""

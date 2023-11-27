@@ -33,14 +33,14 @@ TMPDIR="/tmp"
 NOINTERACT="0"
 
 # format colors
-GREEN="\e[32m"
-RED="\e[31m"
-CYAN="\e[36m"
-BGREEN="\e[1;32m"
-BRED="\e[1;31m"
-BCYAN="\e[1;36m"
-BOLD="\e[1;97m"
-ENDC="\e[0m"
+ENDC="$(tput sgr0)"
+GREEN="$(tput setaf 2)"
+RED="$(tput setaf 1)"
+CYAN="$(tput setaf 6)"
+BOLD="$(tput bold)"
+BGREEN="${BOLD}${GREEN}"
+BRED="${BOLD}${RED}"
+BCYAN="${BOLD}${CYAN}"
 
 # config files
 INIT_DIR="/etc/init.d"
@@ -545,10 +545,10 @@ get_status() {
 	fi
 
 	# print status
-	echo -e "${stts_color}status${ENDC}: ${conn_color}$conn_stts${ENDC}"
-	echo -e "  ${BOLD}interface${ENDC}: $if_stts"
-	echo -e "  ${BOLD}peer${ENDC}: $peer_stts"
-	echo -e "  ${BOLD}routing${ENDC}: $routing_stts"
+	printf "${stts_color}status${ENDC}: ${conn_color}$conn_stts${ENDC}\n"
+	printf "  ${BOLD}interface${ENDC}: $if_stts\n"
+	printf "  ${BOLD}peer${ENDC}: $peer_stts\n"
+	printf "  ${BOLD}routing${ENDC}: $routing_stts\n"
 
 	# print info if interface is up
 	if [[ "$if_stts" == "up" ]]; then
@@ -1133,16 +1133,37 @@ exit_args() {
 	exit 1
 }
 
+#
 # main
-[ $# -lt 1 ] && exit_args "few" ""
-m_opt=$1
-shift
-if [[ "$m_opt" == "-y" ]]; then
-	NOINTERACT="1"
+#
+
+# options loop
+in_opt="0"
+while [[ "$in_opt" == "0" ]]; do
 	[ $# -lt 1 ] && exit_args "few" ""
 	m_opt=$1
 	shift
-fi
+	case "$m_opt" in
+		"-y")
+			NOINTERACT="1"
+			;;
+		"--nocolor")
+			ENDC=""
+			GREEN=""
+			RED=""
+			CYAN=""
+			BOLD=""
+			BGREEN=""
+			BRED=""
+			BCYAN=""
+			;;
+		*)
+			in_opt="1"
+			;;
+	esac
+done
+
+# modules
 case "$m_opt" in
 	"-h" | "--help")
 		[ $# -gt 0 ] && exit_args "many" ""

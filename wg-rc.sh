@@ -44,8 +44,7 @@ BCYAN="${BOLD}${CYAN}"
 INIT_DIR="/etc/init.d"
 CONF_DIR="/etc/conf.d"
 WG_DIR="/etc/wireguard"
-WGRC_IF="$WG_DIR/wgrc.if"
-TMP_CONFIG="$TMP_DIR/wgrc.conf"
+TMP_CONF="$TMP_DIR/wg-rc.conf"
 NET_LO="$INIT_DIR/net.lo"
 NET_CONF="$CONF_DIR/net"
 DEFAULT_IP="10.5.0.2/32"
@@ -74,16 +73,26 @@ set_interface() {
 		exit 1
 	fi
 
-	# file paths
-	local net_lo_file net_if_file net_conf_file wg_if_file
+	create_interface "$interface"
+	configure_interface "$interface"
+	create_wireguard_config "$interface"
 
-	net_if_file="$INIT_DIR/net.$interface"
-	wg_if_file="$WIREGUARD_DIR/$interface.conf"
+	echo -e ""
+	echo -e "${GREEN}Interface${ENDC} '${BGREEN}$interface${ENDC}' ${GREEN}configured.${ENDC}"
+	echo -e ""
+}
+
+create_interface() {
+	verify_root
+	
+	local interface net_if
+	interface=$1
+	net_if="$INIT_DIR/net.$interface"
 
 	# check for existing net config file
-	if [[ "$NOINTERACT" == "0" ]] && test -f "$net_if_file"; then
+	if [[ "$NOINTERACT" == "0" ]] && test -f "$net_if"; then
 		echo -e ""
-		echo -e "Interface init script '${BOLD}$net_if_file${ENDC}' already exists."
+		echo -e "Interface init script '${BOLD}$net_if${ENDC}' already exists."
 		echo -e ""
 		read -p "$(echo -e "${BOLD}Do you want to override it?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
 		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -95,48 +104,39 @@ set_interface() {
 	fi
 
 	echo -e ""
-	echo -e "Creating init script at '${BOLD}$net_if_file${ENDC}' ..."
+	echo -e "Creating init script at '${BOLD}$net_if${ENDC}' ..."
 
-	rm -rf $net_if_file 2>/dev/null
-	ln -s $net_lo_file $net_if_file
+	rm -rf $net_if 2>/dev/null
+	ln -s $NET_LO $net_if
 
 	# check for existing config file
-	if ! test -f "$net_if_file" || [[ "$(realpath $net_if_file)" != "$net_lo_file" ]]; then
+	if ! test -f "$net_if" || [[ "$(realpath $net_if)" != "$NET_LO" ]]; then
 		echo -e ""
-		echo -e "${RED}Init script at${ENDC} '${BRED}$net_if_file${ENDC}' ${RED}is not valid.${ENDC}"
+		echo -e "${RED}Could not create init script at${ENDC} '${BRED}$net_if${ENDC}' ${RED}.${ENDC}"
 		echo -e ""
 		exit 1
 	fi
 
 	echo -e ""
-	echo -e "${GREEN}Init script at${ENDC} '${BGREEN}$net_if_file${ENDC}' ${GREEN}is valid.${ENDC}"
+	echo -e "${GREEN}Created init script at${ENDC} '${BGREEN}$net_if${ENDC}' ${GREEN}.${ENDC}"
+}
 
-	echo -e ""
-	echo -e "Creating network configuration at '${BOLD}$net_conf_file${ENDC}' ..."
-
-	# check for interface config
-	local net_conf_wg_if net_conf_config_if net_conf wg_if_line config_if_line config_if
-
-	net_conf_wg_pre="wireguard_$interface="
-	net_conf_config_pre="config_$interface="
-	net_conf_wg_ful="wireguard_$interface=\"$wg_if_file\""
-	net_conf_config_ful="config_$interface=\"$DEFAULT_IP"	
-
-	# read config file
-	net_conf=$(cat "$net_conf_file" 2>/dev/null)
-	net_conf_wg_found=$(printf %b "$net_conf" | grep "^$net_conf_wg_pre\$" 2>/dev/null)
-	net_conf_config_found=$(printf %b "$net_conf" | grep "^$net_conf_config_pre" 2>/dev/null)
+configure_interface() {
+	verify_root
 	
-	net_conf_clear=$(printf %b "$net_conf" | grep -v "^$net_conf_wg_pre\$" 2>/dev/null | grep -v "^$net_conf_config_pre" 2>/dev/null)
-	config_if=$(printf %b "$config_if_line" | sed -r "s/$net_conf_config_if//g" | sed -r "s/\"//g")
+	local interface wg_if_conf net_wg_pre net_config_pre net_content net_wg_found net_config_found
+	interface=$1
+	wg_if_conf="$WIREGUARD_DIR/$interface.conf"
+	net_wg_pre="wireguard_$interface="
+	net_config_pre="config_$interface="
+	net_content=$(cat "$NET_CONF" 2>/dev/null)
+	net_wg_found=$(printf %b "$net_content" | grep -c "^$net_wg_pre\$" 2>/dev/null)
+	net_config_found=$(printf %b "$net_content" | grep -c "^$net_config_pre" 2>/dev/null)
 
-	echo -e ""
-	echo -e "${GREEN}Interface${ENDC} '${BGREEN}$interface${ENDC}' ${GREEN}configured as${ENDC} '${BGREEN}$config_if${ENDC}'${GREEN}.${ENDC}"
-	
-	# check for existing config file
-	if [[ "$NOINTERACT" == "0" ]] && test -f "$wg_if_file"; then
+	# check for existing net config file
+	if [[ "$NOINTERACT" == "0" ]] && test -f "$NET_CONF" && (( $net_wg_found + $net_config_found > 0 )); then
 		echo -e ""
-		echo -e "WireGuard config file '${BOLD}$wg_if_file${ENDC}' already exists."
+		echo -e "Interface configuration at '${BOLD}$NET_CONF${ENDC}' already exists."
 		echo -e ""
 		read -p "$(echo -e "${BOLD}Do you want to override it?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
 		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
@@ -147,30 +147,59 @@ set_interface() {
 		fi
 	fi
 
-	# read config file
-	config=$(cat "$WG_IF" 2>/dev/null || echo "{}")
-	
-	# create new config
-	config=$(printf %s "$config" | jq --arg if "$interface" '.interface = $if')
-	
-	# write updated config file
-	mkdir -p "$NORDVPN_DIR"
-	echo "$config" > "$NORDVPN_CONFIG"
-	chmod 600 "$NORDVPN_CONFIG"
-	
 	echo -e ""
-	echo -e "${GREEN}Interface${ENDC} '${BGREEN}$interface${ENDC}' ${GREEN}configured.${ENDC}"
+	echo -e "Creating network configuration at '${BOLD}$NET_CONF${ENDC}' ..."
+	
+	local net_wg_ful net_config_full net_clear
+	net_wg_ful="$net_wg_pre\"$wg_if_conf\""
+	net_config_ful="$net_config_pre\"$DEFAULT_IP"
+	net_clear=$(printf %b "$net_content" | grep -v "^$net_wg_pre\$" 2>/dev/null | grep -v "^$net_config_pre" 2>/dev/null)
+	
+	printf "$net_clear" > $NET_CONF
+	printf "$net_wg_ful" >> $NET_CONF
+	printf "$net_config_ful" >> $NET_CONF
+
 	echo -e ""
+	echo -e "${GREEN}Interface${ENDC} '${BGREEN}$interface${ENDC}' ${GREEN}configured as${ENDC} '${BGREEN}$DEFAULT_IP${ENDC}'${GREEN}.${ENDC}"
+}
+
+create_wireguard_config() {
+	verify_root
+	
+	local interface wg_if_conf
+	interface=$1
+	wg_if_conf="$WIREGUARD_DIR/$interface.conf"
+
+	# check for existing config file
+	if [[ "$NOINTERACT" == "0" ]] && test -f "$wg_if_conf"; then
+		echo -e ""
+		echo -e "WireGuard config file '${BOLD}$wg_if_conf${ENDC}' already exists."
+		echo -e ""
+		read -p "$(echo -e "${BOLD}Do you want to override it?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
+		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+			echo -e ""
+    			echo -e "Not doing anything."
+			echo -e ""
+			exit 0
+		fi
+	fi
+
+	echo -e ""
+	echo -e "Creating WireGuard config file at '${BOLD}$wg_if_conf${ENDC}' ..."
+	
+	rm -rf $wg_if_conf
+	ln -s $TMP_CONF	$wg_if_conf
+
+	echo -e ""
+	echo -e "${GREEN}Created WireGuard config file for interface${ENDC} '${BGREEN}$interface${ENDC}' ${GREEN}at${ENDC} '${BGREEN}$wg_if_conf${ENDC}'${GREEN}.${ENDC}"
 }
 
 # get status of current wireguard connection
 get_status() {
 	verify_root
 
-	local config interface server_id response server if_pub_key if_stts peer_stts routing_stts conn_stts
-
-	# read config file
-	interface=$(cat "$WGRC_CONFIG" 2>/dev/null || echo "{}")
+	local interface server_id response server if_pub_key if_stts peer_stts routing_stts conn_stts
+	interface=$1
 	
 	if [[ "$interface" == "" ]]; then
 		echoexit "error: invalid wireguard interface."
@@ -220,9 +249,6 @@ get_status() {
 		# print wireguard info
 		echo -e ""
 		wg show "$interface"
-		# print nordvpn server info
-		echo -e ""
-		show_server "$server"
 	fi
 }
 

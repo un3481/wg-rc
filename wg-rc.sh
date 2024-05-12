@@ -1,8 +1,8 @@
 #!/bin/sh
 #
-# NORDVPN-RC
+# WG-RC
 #
-# NordVPN client using WireGuard and Netifrc.
+# WireGuard client using Netifrc.
 #
 
 # exit when any command fails
@@ -15,8 +15,6 @@ echoexit() {
 }
 
 # Checking dependencies:
-whereis curl > /dev/null || echoexit "'curl' command not found."
-whereis jq > /dev/null || echoexit "'jq' command not found."
 whereis wg > /dev/null || echoexit "'wg' command not found."
 whereis ip > /dev/null || echoexit "'ip' command not found."
 whereis nft > /dev/null || echoexit "'nft' command not found."
@@ -46,49 +44,11 @@ BCYAN="${BOLD}${CYAN}"
 INIT_DIR="/etc/init.d"
 CONF_DIR="/etc/conf.d"
 WIREGUARD_DIR="/etc/wireguard"
-NORDVPN_DIR="$WIREGUARD_DIR/nordvpn"
-NORDVPN_CONFIG="$NORDVPN_DIR/config.json"
+TMP_CONFIG="$TMPDIR/wg.conf"
+net_lo_file="$INIT_DIR/net.lo"
+net_conf_file="$CONF_DIR/net"
 
-# urls
-NORDVPN_API_BASE="https://api.nordvpn.com"
-NORDVPN_API_USER="$NORDVPN_API_BASE/v1/users/current"
-NORDVPN_API_CREDENTIALS="$NORDVPN_API_BASE/v1/users/services/credentials"
-NORDVPN_API_SERVERS="$NORDVPN_API_BASE/v1/servers"
-NORDVPN_API_COUNTRIES="$NORDVPN_API_BASE/v1/servers/countries"
-NORDVPN_API_RECOMMENDED="$NORDVPN_API_BASE/v1/servers/recommendations"
-
-# id of wireguard servers
-NORDVPN_WG_ID="35"
-
-# api servers filters
-NORDVPN_API_SERVERS_FILTERS="filters\[servers.status\]=online"
-NORDVPN_API_SERVERS_FILTERS+="&filters\[servers_technologies\]\[id\]=$NORDVPN_WG_ID"
-NORDVPN_API_SERVERS_FILTERS+="&filters\[servers_technologies\]\[pivot\]\[status\]=online"
-
-# api servers fields
-NORDVPN_API_SERVERS_FIELDS="fields\[servers.id\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.name\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.hostname\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.station\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.load\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.created_at\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.groups.id\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.groups.title\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.technologies.id\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.technologies.metadata\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.id\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.name\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.id\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.name\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.latitude\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.longitude\]"
-NORDVPN_API_SERVERS_FIELDS+="&fields\[servers.locations.country.city.hub_score\]"
-
-# servers query
-NORDVPN_API_SERVERS_BASE="$NORDVPN_API_SERVERS?$NORDVPN_API_SERVERS_FIELDS&$NORDVPN_API_SERVERS_FILTERS"
-
-# recommended servers query
-NORDVPN_API_RECOMMENDED_BASE="$NORDVPN_API_RECOMMENDED?$NORDVPN_API_SERVERS_FIELDS&$NORDVPN_API_SERVERS_FILTERS"
+DEFAULT_IP="10.5.0.2/32"
 
 # verify if user has root privileges
 verify_root() {
@@ -97,149 +57,6 @@ verify_root() {
 		echo -e "Try '${BOLD}sudo nordvpn-rc <options>${ENDC}' or login as root."
 		exit 1
 	fi
-}
-
-# verify api response
-verify_response() {
-	local response errors
-	response=$1
-
-	# check for errors in response
-	if [[ "$response" == "" ]]; then
-		echoexit "api_error: API call returned nothing."
-	fi	
-	errors=$(printf %s "$response" | jq '.errors' 2>/dev/null)
-	if [[ "$errors" != "" ]] && [[ "$errors" != "null" ]]; then
-		echoexit "api_error: API replied with errors: '$errors'."
-	fi
-}
-
-# verify if token is valid on remote
-verify_token() {
-	local token response errors valid
-	token=$1
-
-	# request api for user metadata
-	response=$(curl -s "$NORDVPN_API_USER" -u "token:$token")
-
-	# check for errors in response
-	valid="valid"
-	if [[ "$response" == "" ]]; then
-		exit_invalid_token
-	fi
-	errors=$(printf %s "$response" | jq '.errors' 2>/dev/null)
-	if [[ "$errors" != "" ]] && [[ "$errors" != "null" ]]; then
-		exit_invalid_token
-	fi
-}
-
-# print error message for invalid token and exit
-exit_invalid_token() {
-	echo -e ""
-	echo -e "${RED}You have not set a valid${ENDC} ${BRED}Access Token${ENDC}${RED}.${ENDC}"
-	echo -e ""
-	echo -e "Please follow the instructions to obtain a new token: https://support.nordvpn.com/Connectivity/Linux/1905092252/How-to-log-in-to-NordVPN-on-Linux-with-a-token.htm"
-	echo -e ""
-	echo -e "Once you have copied your token, you can use it by running '${BOLD}nordvpn-rc set token <value>${ENDC}'."
-	echo -e ""
-	exit 1
-}
-
-# get wireguard private key from nordvpn and put it in the config file
-update_private_key() {
-	verify_root
-
-	local config token response private_key
-
-	# read config file
-	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
-
-	# get nordvpn token from config file
-	token=$(printf %s "$config" | jq -r '.token')
-
-	# request api for credentials
-	response=$(curl -s "$NORDVPN_API_CREDENTIALS" -u "token:$token")
-	verify_response "$response"
-
-	# get private key from response
-	private_key=$(printf %s "$response" | jq -r '.nordlynx_private_key')
-	if [[ "$private_key" == "" ]]; then
-		echoexit "api_error: API did not provide a valid private_key."
-	fi
-
-	# create new config
-	config=$(printf %s "$config" | jq --arg key "$private_key" '.private_key = $key')
-
-	# write updated config file
-	mkdir -p "$NORDVPN_DIR"
-	echo "$config" > "$NORDVPN_CONFIG"
-	chmod 600 "$NORDVPN_CONFIG"
-}
-
-# set nordvpn access token in the config file
-set_token() {
-	verify_root
-
-	local config token valid
-	token=$1
-
-	# check the string provided by user
-	if [[ "$token" == "" ]]; then
-		echo -e ""
-		echo -e "Attempting to set ${RED}invalid${ENDC} ${BOLD}Access Token${ENDC}."
-		echo -e ""
-		exit 1
-	fi
-
-	echo -e ""
-	echo -e "Verifying ${BOLD}Access Token${ENDC} ..."
-	
-	# verify token
-	verify_token "$token"
-
-	echo -e ""
-	echo -e "${BGREEN}Access Token${ENDC} ${GREEN}is valid!${ENDC}"
-
-	# ask for user confirmation
-	if [[ "$NOINTERACT" == "0" ]]; then
-		echo -e ""
-		echo -e "Your ${BOLD}Access Token${ENDC} will be updated. Any previous credentials will be lost."
-		echo -e ""
-		read -p "$(echo -e "${BOLD}Do you want to continue?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
-		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-			echo -e ""
-    			echo -e "Not doing anything."
-			echo -e ""
-			exit 0
-		fi
-	fi
-
-	echo -e ""
-	echo -e "Updating ${BOLD}Access Token${ENDC} ..."
-
-	# read config file
-	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
-	
-	# create new config
-	config=$(printf %s "$config" | jq --arg tok "$token" '.token = $tok')
-	
-	# write updated config file
-	mkdir -p "$NORDVPN_DIR"
-	echo "$config" > "$NORDVPN_CONFIG"
-	chmod 600 "$NORDVPN_CONFIG"
-
-	echo -e ""
-	echo -e "${BGREEN}Access Token${ENDC} ${GREEN}updated successfully!${ENDC}"
-
-	echo -e ""
-	echo -e "Updating ${BOLD}WireGuard Private Key${ENDC} ..."
-
-	# update credentials
-	update_private_key
-
-	echo -e ""
-	echo -e "${BGREEN}WireGuard Private Key${ENDC} ${GREEN}updated successfully!${ENDC}"
-	echo -e ""
 }
 
 # set wireguard interface in the config file
@@ -260,13 +77,28 @@ set_interface() {
 	# file paths
 	local net_lo_file net_if_file net_conf_file wg_if_file
 
-	net_lo_file="$INIT_DIR/net.lo"
 	net_if_file="$INIT_DIR/net.$interface"
-	net_conf_file="$CONF_DIR/net"
 	wg_if_file="$WIREGUARD_DIR/$interface.conf"
 
+	# check for existing net config file
+	if [[ "$NOINTERACT" == "0" ]] && test -f "$net_if_file"; then
+		echo -e ""
+		echo -e "Interface init script '${BOLD}$net_if_file${ENDC}' already exists."
+		echo -e ""
+		read -p "$(echo -e "${BOLD}Do you want to override it?${ENDC} [${BGREEN}Yes${ENDC}/${BRED}No${ENDC}] ")" -r
+		if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+			echo -e ""
+    			echo -e "Not doing anything."
+			echo -e ""
+			exit 0
+		fi
+	fi
+
 	echo -e ""
-	echo -e "Checking init script at '${BOLD}$net_if_file${ENDC}' ..."
+	echo -e "Creating init script at '${BOLD}$net_if_file${ENDC}' ..."
+
+	rm -rf $net_if_file 2>/dev/null
+	ln -s $net_lo_file $net_if_file
 
 	# check for existing config file
 	if ! test -f "$net_if_file" || [[ "$(realpath $net_if_file)" != "$net_lo_file" ]]; then
@@ -280,27 +112,23 @@ set_interface() {
 	echo -e "${GREEN}Init script at${ENDC} '${BGREEN}$net_if_file${ENDC}' ${GREEN}is valid.${ENDC}"
 
 	echo -e ""
-	echo -e "Checking network configuration at '${BOLD}$net_conf_file${ENDC}' ..."
+	echo -e "Creating network configuration at '${BOLD}$net_conf_file${ENDC}' ..."
 
 	# check for interface config
 	local net_conf_wg_if net_conf_config_if net_conf wg_if_line config_if_line config_if
 
-	net_conf_wg_if="wireguard_$interface=\"$wg_if_file\""
-	net_conf_config_if="config_$interface=\""
+	net_conf_wg_pre="wireguard_$interface="
+	net_conf_config_pre="config_$interface="
+	net_conf_wg_ful="wireguard_$interface=\"$wg_if_file\""
+	net_conf_config_ful="config_$interface=\"$DEFAULT_IP"	
 
 	# read config file
 	net_conf=$(cat "$net_conf_file" 2>/dev/null)
-	wg_if_line=$(printf %b "$net_conf" | grep "^$net_conf_wg_if\$" 2>/dev/null)
-	config_if_line=$(printf %b "$net_conf" | grep "^$net_conf_config_if" 2>/dev/null)
+	net_conf_wg_found=$(printf %b "$net_conf" | grep "^$net_conf_wg_pre\$" 2>/dev/null)
+	net_conf_config_found=$(printf %b "$net_conf" | grep "^$net_conf_config_pre" 2>/dev/null)
+	
+	net_conf_clear=$(printf %b "$net_conf" | grep -v "^$net_conf_wg_pre\$" 2>/dev/null | grep -v "^$net_conf_config_pre" 2>/dev/null)
 	config_if=$(printf %b "$config_if_line" | sed -r "s/$net_conf_config_if//g" | sed -r "s/\"//g")
-
-	# check for line in file	
-	if [[ "$wg_if_line" == "" ]] || [[ "$config_if_line" == "" ]]; then
-		echo -e ""
-		echo -e "${RED}Network configuration missing at${ENDC} '${BRED}$net_conf_file${ENDC}'${RED}.${ENDC}"
-		echo -e ""
-		exit 1
-	fi
 
 	echo -e ""
 	echo -e "${GREEN}Interface${ENDC} '${BGREEN}$interface${ENDC}' ${GREEN}configured as${ENDC} '${BGREEN}$config_if${ENDC}'${GREEN}.${ENDC}"
@@ -335,150 +163,6 @@ set_interface() {
 	echo -e ""
 }
 
-# get countries from nordvpn
-get_countries() {
-	local response countries
-
-	# request api for countries
-	response=$(curl -s "$NORDVPN_API_COUNTRIES")
-	verify_response "$response"
-
-	# extract country name and id
-	countries=$(printf %s "$response" | jq 'map({ id: .id, conde: .code, name: .name })')
-
-	# return response
-	printf %s "$countries"
-}
-
-# get cities from nordvpn
-get_cities() {
-	local country response cities
-	country=$1
-
-	# request api for countries
-	response=$(curl -s "$NORDVPN_API_COUNTRIES")
-	verify_response "$response"
-
-	# extract city name and id
-	cities=$(printf %s "$response" | jq --arg cc "$country" '.[] | select((.name|ascii_upcase) == ($cc|ascii_upcase)) | .cities | map({id: .id, name: .name})')
-
-	# return response
-	printf %s "$cities"
-}
-
-# print server info to terminal
-show_server() {
-	local server form cyan white normcyan boldcyan bold endcolor
-	server=$1
-
-	# check server
-	if [[ "$server" == "" ]] || [[ "$server" == "null" ]]; then
-		echoexit "error: invalid server json."
-	fi
-
-	# print formattated output
-	echo -e "${BCYAN}nordvpn${ENDC}: ${CYAN}$(printf %s "$server" | jq -r '.id')${ENDC}"
-	echo -e "  ${BOLD}name${ENDC}: $(printf %s "$server" | jq -r '.name')"
-	echo -e "  ${BOLD}hostname${ENDC}: $(printf %s "$server" | jq -r '.hostname')"
-	echo -e "  ${BOLD}station${ENDC}: $(printf %s "$server" | jq -r '.station')"
-	echo -e "  ${BOLD}public key${ENDC}: $(printf %s "$server" | jq -r --argjson wi "$NORDVPN_WG_ID" '.technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')"	
-	echo -e "  ${BOLD}groups${ENDC}: $(printf %s "$server" | jq -r '.groups | map(.title) | join(", ")')"
-	echo -e "  ${BOLD}created at${ENDC}: $(printf %s "$server" | jq -r '.created_at')"
-	echo -e "  ${BOLD}country${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.name')"
-	echo -e "  ${BOLD}city${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.city.name')"
-	echo -e "  ${BOLD}latitude${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.city.latitude')"
-	echo -e "  ${BOLD}longitude${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.city.longitude')"
-	echo -e "  ${BOLD}hub score${ENDC}: $(printf %s "$server" | jq -r '.locations[].country.city.hub_score')"
-	echo -e "  ${BOLD}load${ENDC}: $(printf %s "$server" | jq -r '.load')"
-}
-
-# get server id from file
-get_server_id() {
-	verify_root
-
-	local interface wg_if_file wg_if line server_id
-	interface=$1
-
-	# wireguard config file name
-	wg_if_file="$WIREGUARD_DIR/$interface.conf"
-	
-	# check if file exists
-	if ! test -f "$wg_if_file"; then
-		echoexit "No interface config file found."
-	fi
-
-	# read config file
-	wg_if=$(cat "$wg_if_file" 2>/dev/null)
-
-	# check for line in file
-	line=$(printf %b "$wg_if" | grep "^# SERVER_ID = " 2>/dev/null)
-	if [[ "$line" == "" ]]; then
-		echoexit "error: invalid wireguard config '$wg_if_file'."
-	fi
-
-	# extract server id
-	server_id=$(printf %s "$line" | cut -d "=" -f 2 | sed -r "s/\ //g")
-	
-	# return server id
-	printf %s "$server_id"
-}
-
-# get server hostname from file
-get_server_hostname() {
-	verify_root
-
-	local interface wg_if_file wg_if line hostname
-	interface=$1
-
-	# wireguard config file name
-	wg_if_file="$WIREGUARD_DIR/$interface.conf"
-	
-	# check if file exists
-	if ! test -f "$wg_if_file"; then
-		echoexit "error: no interface config file found."
-	fi
-
-	# read config file
-	wg_if="$(cat "$wg_if_file" 2>/dev/null)"
-
-	# check for line in file
-	line="$(printf %b "$wg_if" | grep "^# HOSTNAME = " 2>/dev/null)"
-	if [[ "$line" == "" ]]; then
-		echoexit "error: invalid wireguard config '$wg_if_file'."
-	fi
-
-	# extract server hostname
-	hostname=$(printf %s "$line" | cut -d "=" -f 2 | sed -r "s/\ //g")
-	
-	# return server hostname
-	printf %s "$hostname"
-}
-
-# check if wireguard conifg matches connected interface
-peer_online() {
-	verify_root
-
-	local interface server server_ip server_key if_endpoint if_ip if_key
-	interface=$1
-	server=$2
-
-	# get server info
-	server_ip="$(printf %s "$server" | jq -r '.station')"
-	server_key="$(printf %s "$server" | jq -r --argjson wi "$NORDVPN_WG_ID" '.technologies[] | select(.id == $wi) | .metadata[] | select(.name == "public_key") | .value')"
-
-	# get interface info
-	if_endpoint="$(wg show "$interface" endpoints 2>/dev/null)"
-	if_ip="$(printf %s "$if_endpoint" | sed -r 's/[[:blank:]]+/ /g' | cut -d " " -f 2 | cut -d ":" -f 1)"
-	if_key="$(printf %s "$if_endpoint" | sed -r 's/[[:blank:]]+/ /g' | cut -d " " -f 1)"
-
-	# print result of match
-	if [[ "$server_ip" == "$if_ip" ]] && [[ "$server_key" == "$if_key" ]]; then
-		printf %s "online"
-	else
-		printf %s "offline"
-	fi
-}
-
 # get status of current wireguard connection
 get_status() {
 	verify_root
@@ -486,7 +170,7 @@ get_status() {
 	local config interface server_id response server if_pub_key if_stts peer_stts routing_stts conn_stts
 
 	# read config file
-	config=$(cat "$NORDVPN_CONFIG" 2>/dev/null || echo "{}")
+	config=$(cat "$WGRC_CONFIG" 2>/dev/null || echo "{}")
 	
 	# extract interface
 	interface=$(printf %s "$config" | jq -r '.interface')
